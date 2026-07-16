@@ -1,0 +1,19 @@
+{
+    "name": "evoludata/cypht-module",
+    "description": "Cypht integration for Dolibarr",
+    "type": "module",
+    "require": {
+        "jason-munro/cypht": "^2.11"
+    },
+    "autoload": {
+        "psr-4": {
+            "Evoludata\\CyphtModule\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "camilevahviraki",
+            "email": "camilevahviraki@gmail.com"
+        }
+    ]
+}

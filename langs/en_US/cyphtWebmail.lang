@@ -1,0 +1,61 @@
+# Translation file
+
+#
+# Generic
+#
+
+# Module label - key must match 'titre' in the descriptor's $this->menu entry exactly (case-sensitive)
+ModulecyphtWebmailName = CyphtWebmail
+# Module description - key must match $this->description in the descriptor exactly (case-sensitive)
+cyphtWebmailDescription = Cypht webmail integrated into Dolibarr
+
+#
+# Admin page
+#
+CyphtWebmailSetup = CyphtWebmail setup
+Settings = Settings
+CyphtWebmailSetupPage = CyphtWebmail setup page
+NewSection=New section
+
+CyphtWebmailImapName = IMAP server label
+CyphtWebmailImapServer = IMAP server hostname
+CyphtWebmailImapPort = IMAP server port
+CyphtWebmailImapTls = Use TLS
+
+CyphtWebmailBuildStatus = Cypht build status
+CyphtWebmailInstalledVersion = Cypht version installed (vendor/)
+CyphtWebmailBuiltVersion = Cypht version last built
+CyphtWebmailLastBuild = Last build date
+CyphtWebmailNeverBuilt = Never built yet
+CyphtWebmailNotInstalled = Not installed - run "composer install" in the module directory
+CyphtWebmailUpdateAvailable = Update available: version %s is installed but not built yet - click Generate to rebuild
+CyphtWebmailUpToDate = Up to date
+CyphtWebmailGenerateButton = Generate / Rebuild Cypht configuration
+CyphtWebmailBuilding = Building... this can take a minute, please wait
+CyphtWebmailBuildLog = Build log
+CyphtWebmailBuildSuccess = Cypht configuration built and published successfully
+CyphtWebmailBuildFailed = Cypht configuration build failed
+SetupSaved = Settings saved
+
+CyphtWebmailNotYetBuilt = Cypht has not been built yet.
+CyphtWebmailGoToSetup = Go to setup to generate it
+
+
+#
+# About page
+#
+About = About
+CyphtWebmailAbout = About CyphtWebmail
+CyphtWebmailAboutPage = CyphtWebmail about page
+
+#
+# Sample page
+#
+CyphtWebmailArea = Home CyphtWebmail
+MyPageName = My page name
+
+#
+# Sample widget
+#
+MyWidget = My widget
+MyWidgetDescription = My widget description
