@@ -34,18 +34,7 @@ $j = strlen($tmp2) - 1;
 while ($i > 0 && $j > 0 && isset($tmp[$i]) && isset($tmp2[$j]) && $tmp[$i] == $tmp2[$j]) {
 	$i--; $j--;
 }
-if (!$res && $i > 0 && file_exists(substr($tmp, 0, ($i + 1))."/main.inc.php")) {
-	$res = @include substr($tmp, 0, ($i + 1))."/main.inc.php";
-}
-if (!$res && $i > 0 && file_exists(dirname(substr($tmp, 0, ($i + 1)))."/main.inc.php")) {
-	$res = @include dirname(substr($tmp, 0, ($i + 1)))."/main.inc.php";
-}
-if (!$res && file_exists("../main.inc.php")) {
-	$res = @include "../main.inc.php";
-}
-if (!$res && file_exists("../../main.inc.php")) {
-	$res = @include "../../main.inc.php";
-}
+
 if (!$res && file_exists("../../../main.inc.php")) {
 	$res = @include "../../../main.inc.php";
 }
@@ -59,12 +48,12 @@ require_once __DIR__.'/../class/cyphtmanager.class.php';
 
 global $conf, $db, $langs, $user;
 
-$langs->loadLangs(array("admin", "cyphtWebmail@cyphtWebmail"));
-
 // This is a global setup page: require admin rights.
 if (!$user->admin) {
 	accessforbidden();
 }
+
+$langs->loadLangs(array("admin", "cyphtWebmail@cyphtWebmail"));
 
 $action = GETPOST('action', 'aZ09');
 $manager = new CyphtManager($db);
@@ -81,6 +70,11 @@ if ($action == 'update_settings') {
 }
 
 $form = new Form($db);
+$manager = new CyphtManager($db);
+// Computed once and reused for every form/JS call on this page rather than
+// calling newToken() repeatedly - safer than assuming it's idempotent
+// within a single request.
+$formToken = newToken();
 
 llxHeader('', $langs->trans("CyphtWebmailSetup"));
 
@@ -96,7 +90,7 @@ print dol_get_fiche_head($head, 'settings', '', -1);
 
 // ---- IMAP settings form ----
 print '<form method="POST" action="'.$_SERVER["PHP_SELF"].'">';
-print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="token" value="'.$formToken.'">';
 print '<input type="hidden" name="action" value="update_settings">';
 
 print '<table class="noborder centpercent">';
@@ -128,71 +122,8 @@ print '</form>';
 
 print dol_get_fiche_end();
 
-/**
- * Push whatever has been printed so far out to the browser immediately,
- * bypassing both PHP's own output buffer (if any is active) and Apache's.
- * Used before and repeatedly during the build so the connection never goes
- * silent long enough for Apache's own request timeout to drop it, and so
- * the page shows real progress instead of looking frozen.
- *
- * @return void
- */
-function cyphtwebmail_flush_now()
-{
-	if (ob_get_level() > 0) {
-		@ob_flush();
-	}
-	@flush();
-}
 
-cyphtwebmail_flush_now();
-
-if ($action == 'build') {
-	// The full pipeline (composer install + config_gen.php + copying the
-	// build output) runs synchronously inside this one request and can
-	// legitimately take over a minute - well past PHP's default 30s
-	// max_execution_time. Give this specific request more room so PHP
-	// doesn't kill it mid-build (the subprocess itself is still capped by
-	// CyphtManager's own internal timeout regardless).
-	@set_time_limit(300);
-
-	// PHP's default session handler holds an exclusive file lock on the
-	// session for as long as this request runs. Without releasing it here,
-	// every other Dolibarr tab/page in the same browser session would sit
-	// blocked behind this one request for the full build duration. $user,
-	// $conf, $db etc. are already loaded into plain PHP variables by this
-	// point and don't need the session to stay open for reading.
-	if (session_id()) {
-		session_write_close();
-	}
-
-	print load_fiche_titre($langs->trans("CyphtWebmailBuildLog"), '', '');
-	print '<pre style="background:#f5f5f5; padding: 10px; max-height: 500px; overflow:auto; border: 1px solid #ddd;">';
-	cyphtwebmail_flush_now();
-
-	// Streamed live: each chunk is printed and flushed to the browser the
-	// moment CyphtManager has it, instead of being collected silently and
-	// only shown once the entire build finishes.
-	$buildResult = $manager->runConfigGen(function ($chunk) {
-		print dol_escape_htmltag($chunk, 1, 1);
-		cyphtwebmail_flush_now();
-	});
-
-	print '</pre>';
-
-	// Briefly reopen the session so we can still store user prefs etc.
-	// normally for the rest of this request and future ones.
-	if (session_id()) {
-		session_start();
-	}
-
-	if ($buildResult['success']) {
-		print '<div class="ok" style="margin: 10px 0; padding: 8px;">'.$langs->trans("CyphtWebmailBuildSuccess").'</div>';
-	} else {
-		print '<div class="error" style="margin: 10px 0; padding: 8px;">'.$langs->trans("CyphtWebmailBuildFailed").' : '.dol_escape_htmltag($buildResult['error']).'</div>';
-	}
-	cyphtwebmail_flush_now();
-}
+$manager->cyphtwebmail_flush_now();
 
 // ---- Build status (computed fresh here, so if a build just ran above,
 // this reflects its actual outcome rather than stale pre-build values) ----
@@ -236,12 +167,16 @@ print '<div class="center" style="margin-top: 10px;">';
 // still catches it server-side (a reload, a second tab, etc.), this is just
 // the cheap first line of defense plus honest feedback that something is
 // happening, since the page otherwise gives no sign of life while it builds.
-print '<form method="POST" action="'.$_SERVER["PHP_SELF"].'" onsubmit="this.querySelector(\'button[type=submit]\').disabled=true; this.querySelector(\'button[type=submit]\').textContent='.json_encode($langs->trans("CyphtWebmailBuilding")).'; return true;">';
+print '<form id="cypht-build-form" action="./build/build.php">';
 print '<input type="hidden" name="token" value="'.newToken().'">';
 print '<input type="hidden" name="action" value="build">';
-print '<button type="submit" class="button">'.$langs->trans("CyphtWebmailGenerateButton").'</button>';
+print '<button type="submit" class="button" data-loading-text="'.$langs->trans("CyphtWebmailBuilding").'">'.$langs->trans("CyphtWebmailGenerateButton").'</button>';
 print '</form>';
 print '</div>';
+
+print '<pre id="cyphtwebmail-log"></pre>';
+
+print '<script src="'.dol_buildpath('/cyphtWebmail/js/admin/setup.js', 1).'"></script>';
 
 llxFooter();
 $db->close();
