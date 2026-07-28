@@ -280,6 +280,18 @@ class CyphtManager
 			// fingerprint on file - without this, Cypht would treat every
 			// SSO'd session as hijacked and force a re-login.
 			'DISABLE_FINGERPRINT' => 'true',
+			// Critical for running Cypht in-process (performSsoLogin()):
+			// Hm_Request's constructor calls empty_super_globals(), which
+			// does "foreach (array_keys($GLOBALS) as $key) { unset(...) }"
+			// - wiping the ENTIRE PHP global scope, not just $_GET/$_POST/
+			// etc. In a standalone Cypht request that's harmless; called
+			// from inside Dolibarr's own request it deletes Dolibarr's
+			// $langs, $user, $conf, $db globals outright, crashing the
+			// very next line that touches any of them (e.g. llxHeader()).
+			// This is one of the four documented integration flags on
+			// Cypht's own Integration Options wiki page - found the hard
+			// way when this specific one was still missing.
+			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
 			// Shared secret used to sign/verify the short-lived SSO token
 			// cyphtWebmailindex.php generates for the current Dolibarr
 			// user (see CyphtManager::generateSsoLoginToken() and
@@ -694,8 +706,8 @@ PHP;
 	 * response. Must be called before any HTML output.
 	 *
 	 * @param string $login Dolibarr username to log into Cypht as
-	 * @param string $cyphtUrl Absolute URL of the published Cypht app (used
-	 *                          only to derive the cookie domain/path)
+	 * @param string $cyphtUrl URL of the published Cypht app - does not
+	 *                          need to be absolute already, see below
 	 * @return bool true if Cypht accepted the SSO token
 	 */
 	public function performSsoLogin($login, $cyphtUrl)
@@ -710,7 +722,32 @@ PHP;
 
 		$token = $this->generateSsoLoginToken($login);
 
-		return cypht_login($login, $token, $cyphtUrl);
+		return cypht_login($login, $token, $this->absolutizeUrl($cyphtUrl));
+	}
+
+	/**
+	 * cypht_login()'s own url_parse() does parse_url($url)['scheme'/'host']
+	 * with no fallback, to work out the cookie domain/secure flag - it
+	 * needs a real absolute URL. dol_buildpath(..., 1) does not reliably
+	 * return one (can come back host-relative depending on Dolibarr's own
+	 * config), which is what caused "Undefined array key scheme/host"
+	 * warnings here. Prepends the current request's own scheme+host if
+	 * $url doesn't already have one; already-absolute URLs pass through.
+	 *
+	 * @param string $url
+	 * @return string
+	 */
+	private function absolutizeUrl($url)
+	{
+		if (preg_match('#^https?://#i', $url)) {
+			return $url;
+		}
+
+		$scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+		$host = !empty($_SERVER['HTTP_HOST']) ? $_SERVER['HTTP_HOST'] : 'localhost';
+		$path = (substr($url, 0, 1) === '/') ? $url : '/' . $url;
+
+		return $scheme . '://' . $host . $path;
 	}
 
 	/**
@@ -1409,7 +1446,7 @@ PHP;
 			$emit($this->error . "\n");
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
-		$emit("Patched missing hm_exists() guard around get_special_folders() (upstream gap, needed for SSO).\n");
+		$emit("Patched missing hm_exists() guards in modules/core/functions.php (upstream gap, needed for SSO).\n");
 
 		$phpBinary = $this->findPhpBinary();
 		if ($phpBinary === null) {
