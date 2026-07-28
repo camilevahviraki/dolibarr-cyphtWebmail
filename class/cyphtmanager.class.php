@@ -249,6 +249,16 @@ class CyphtManager
 			// needed to prove IMAP webmail works end to end; add modules
 			// back here deliberately once the core flow is proven.
 			'CYPHT_MODULES'    => 'core,imap,smtp,account,idle_timer,nux,profiles,imap_folders,tags,history',
+			// lib/ini_set.php calls ini_set('open_basedir', ...) on every
+			// real page load (not during the build - config_gen.php never
+			// reaches this code path, which is why the build itself always
+			// succeeded while loading the built site crashed). On this
+			// Windows/Apache/mod_php setup that call reliably crashes the
+			// PHP worker outright - no catchable error, no shutdown
+			// function firing, just a dead connection. Cypht ships this
+			// exact escape hatch for that scenario; using it instead of
+			// patching vendored code.
+			'DISABLE_OPEN_BASE_DIR' => 'true',
 		);
 	}
 
