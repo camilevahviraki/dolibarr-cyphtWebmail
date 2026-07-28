@@ -713,6 +713,39 @@ class CyphtManager
 			return false;
 		}
 
+		// Same flat-dependency problem as autoload.php above, but for raw
+		// asset files config_gen.php reads directly off disk instead of
+		// through the autoloader: twbs/bootstrap, twbs/bootstrap-icons and
+		// thomaspark/bootswatch (Bootstrap CSS/JS and the Bootswatch theme
+		// CSS files) also only exist in the module's shared vendor/, not
+		// nested here - which is why every build was logging "Failed to
+		// open stream" warnings for them and shipping a site.css/site.js
+		// missing Bootstrap's base styles and JS bundle entirely. Bridge
+		// each one the same way: symlink if this filesystem/user allows
+		// creating one, falling back to a recursive copy otherwise (e.g.
+		// Windows without Developer Mode or admin rights). Torn down and
+		// recreated every build so neither a symlink target change nor a
+		// stale fallback copy can go unnoticed.
+		$moduleVendor = $this->getModuleRoot() . '/vendor';
+		foreach (array('twbs', 'thomaspark') as $vendor) {
+			$target = $moduleVendor . '/' . $vendor;
+			$link = $bridgeDir . '/' . $vendor;
+
+			if (!is_dir($target)) {
+				continue; // not installed - nothing to bridge
+			}
+
+			if (is_link($link)) {
+				@unlink($link);
+			} elseif (is_dir($link)) {
+				$this->deleteRecursive($link);
+			}
+
+			if (!@symlink($target, $link)) {
+				$this->copyRecursive($target, $link);
+			}
+		}
+
 		return true;
 	}
 
