@@ -69,7 +69,11 @@ if (!$user->admin) {
 	exit;
 }
 
-if (GETPOST('token', 'alpha') !== newToken()) {
+// currentToken(), not newToken() - see the comment in build.php's own
+// token check for why: newToken() rotates the session token as a side
+// effect of being called, so using it here would make this check fail
+// on every request regardless of what the client actually submitted.
+if (GETPOST('token', 'alpha') !== currentToken()) {
 	http_response_code(403);
 	echo json_encode(array('success' => false, 'message' => 'Invalid token'));
 	exit;
