@@ -228,8 +228,29 @@ class CyphtManager
 		$dataDir = $this->getDataDir();
 
 		return array(
-			'SESSION_TYPE'     => 'PHP',
-			'AUTH_TYPE'        => 'IMAP',
+			// 'custom' (not the default 'PHP') is required, not optional:
+			// Cypht's own Integration Options docs warn that its PHP
+			// session type calls PHP's native session_start()/session_id()
+			// directly, which collides with Dolibarr's own already-active
+			// PHP session in the same request (performSsoLogin() runs
+			// in-process, see cyphtWebmailindex.php). Custom_Session
+			// (generated into modules/site/lib.php below) stores Cypht's
+			// session data in its own encrypted files instead, completely
+			// independent of PHP's native session mechanism.
+			'SESSION_TYPE'     => 'custom',
+			// 'custom' hands credential checking entirely to our own
+			// Custom_Auth class (generated into modules/site/lib.php by
+			// buildSiteAuthOverride(), see below) instead of Cypht
+			// connecting to a real IMAP/DB backend to log in. This is what
+			// makes SSO from Dolibarr possible: Dolibarr never has the
+			// user's real mailbox password to hand Cypht, so login can't
+			// depend on one. The IMAP_AUTH_* settings below are kept for
+			// reference/rollback but are no longer consulted for login
+			// once AUTH_TYPE=custom - each user adds their real IMAP
+			// mailbox afterwards via Cypht's own Servers/Accounts page
+			// (exactly how Tiki's integration works), independent of how
+			// they were authenticated.
+			'AUTH_TYPE'        => 'custom',
 			'IMAP_AUTH_NAME'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_NAME', 'Webmail'),
 			'IMAP_AUTH_SERVER' => getDolGlobalString('CYPHTWEBMAIL_IMAP_SERVER', 'localhost'),
 			'IMAP_AUTH_PORT'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_PORT', '993'),
@@ -248,7 +269,22 @@ class CyphtManager
 			// something this POC doesn't need yet. Trimmed to the minimum
 			// needed to prove IMAP webmail works end to end; add modules
 			// back here deliberately once the core flow is proven.
-			'CYPHT_MODULES'    => 'core,imap,smtp,account,idle_timer,nux,profiles,imap_folders,tags,history',
+			// "site" activates our Custom_Auth override; "api_login"
+			// provides the cypht_login()/cypht_logout() functions used
+			// for SSO. "idle_timer" was removed: Cypht's own docs warn it
+			// does not play nice with API/functional logins.
+			'CYPHT_MODULES'    => 'core,imap,smtp,account,site,api_login,nux,profiles,imap_folders,tags,history',
+			// The API/functional login wiki page's documented requirement:
+			// a session established via cypht_login() was never captured
+			// through the normal login form, so it has no browser
+			// fingerprint on file - without this, Cypht would treat every
+			// SSO'd session as hijacked and force a re-login.
+			'DISABLE_FINGERPRINT' => 'true',
+			// Shared secret used to sign/verify the short-lived SSO token
+			// cyphtWebmailindex.php generates for the current Dolibarr
+			// user (see CyphtManager::generateSsoLoginToken() and
+			// buildSiteAuthOverride()). Never a real mailbox password.
+			'SSO_SHARED_SECRET' => $this->getOrCreateSsoSecret(),
 			// lib/ini_set.php calls ini_set('open_basedir', ...) on every
 			// real page load (not during the build - config_gen.php never
 			// reaches this code path, which is why the build itself always
@@ -260,6 +296,421 @@ class CyphtManager
 			// patching vendored code.
 			'DISABLE_OPEN_BASE_DIR' => 'true',
 		);
+	}
+
+	/**
+	 * Shared secret used to sign the short-lived SSO tokens passed to
+	 * Cypht's cypht_login() in place of a real mailbox password (see
+	 * generateSsoLoginToken() and buildSiteAuthOverride()). Generated once
+	 * and persisted in llx_const so it survives across requests and
+	 * rebuilds; the same value is written into Cypht's own .env so
+	 * Custom_Auth::check_credentials() can verify against it.
+	 *
+	 * @return string
+	 */
+	public function getOrCreateSsoSecret()
+	{
+		global $conf;
+
+		$secret = getDolGlobalString('CYPHTWEBMAIL_SSO_SECRET', '');
+		if ($secret !== '') {
+			return $secret;
+		}
+
+		$secret = bin2hex(random_bytes(32));
+		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_SSO_SECRET', $secret, 'chaine', 0, '', $conf->entity);
+
+		return $secret;
+	}
+
+	/**
+	 * Build a short-lived, single-purpose token proving "this is really
+	 * the current Dolibarr user", to hand to Cypht's cypht_login() as the
+	 * password argument. It is never a real mailbox credential - just an
+	 * HMAC of the username + timestamp, verified by Custom_Auth in
+	 * modules/site/lib.php against the same SSO_SHARED_SECRET. The 60s
+	 * window keeps a captured token from being replayable indefinitely.
+	 *
+	 * @param string $login Dolibarr username to embed in the token
+	 * @return string
+	 */
+	public function generateSsoLoginToken($login)
+	{
+		$secret = $this->getOrCreateSsoSecret();
+		$timestamp = time();
+		$signature = hash_hmac('sha256', $login . '|' . $timestamp, $secret);
+
+		return $timestamp . '.' . $signature;
+	}
+
+	/**
+	 * Source for the generated modules/site/lib.php override that makes
+	 * AUTH_TYPE=custom authenticate against our SSO token instead of a
+	 * real IMAP/DB backend. Regenerated on every build (same pattern as
+	 * ensureCyphtVendorBridge()'s autoload shim) rather than hand-edited
+	 * in vendor/, so a "composer update" never silently reverts it.
+	 *
+	 * @return string
+	 */
+	private function buildSiteAuthOverrideContent()
+	{
+		return <<<'PHP'
+<?php
+
+/**
+ * Auto-generated by CyphtManager::buildSiteAuthOverride() - do not edit,
+ * this file is recreated on every build and any manual changes will be
+ * lost. See class/cyphtmanager.class.php in the cyphtWebmail module for
+ * the source of truth.
+ *
+ * Implements Dolibarr SSO: AUTH_TYPE=custom hands credential checking to
+ * Custom_Auth below instead of a real IMAP/DB backend. The "password"
+ * Custom_Auth ever sees is a short-lived HMAC token generated by
+ * CyphtManager::generateSsoLoginToken() for the *currently logged in
+ * Dolibarr user* - never a real mailbox password. Once logged in this
+ * way, each user adds their actual IMAP mailbox separately via Cypht's
+ * own Servers/Accounts settings page, exactly as Tiki's integration does.
+ *
+ * SESSION_TYPE=custom activates Custom_Session below, which stores
+ * session data in its own encrypted files rather than PHP's native
+ * session_start()/$_SESSION - required because performSsoLogin() runs
+ * in the same PHP request as Dolibarr's own already-active session, and
+ * Cypht's stock "PHP" session type would collide with it (documented at
+ * https://github.com/cypht-org/cypht/wiki/Integration-Options).
+ *
+ * @package modules
+ * @subpackage site
+ */
+class Custom_Session extends Hm_Session {
+
+    use Hm_Session_Auth;
+
+    /** @var bool true once a new login has established data to persist */
+    private $existing = false;
+
+    private function session_dir() {
+        $base = dirname(rtrim(env('USER_SETTINGS_DIR', sys_get_temp_dir()), '/\\'));
+        $dir = $base.'/sso_sessions';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0700, true);
+        }
+        return $dir;
+    }
+
+    private function session_file($key) {
+        return $this->session_dir().'/'.preg_replace('/[^a-f0-9]/', '', (string) $key).'.session';
+    }
+
+    public function check($request, $user = false, $pass = false, $fingerprint = true) {
+        if ($user !== false && $pass !== false) {
+            if ($this->auth($user, $pass)) {
+                $this->set_key($request);
+                $this->session_key = bin2hex(random_bytes(16));
+                $this->loaded = true;
+                $this->data = [];
+                $this->active = true;
+                if ($fingerprint) {
+                    $this->set_fingerprint($request);
+                } else {
+                    $this->set('fingerprint', '');
+                }
+                $this->save_auth_detail();
+                $this->just_started();
+            }
+        } elseif (array_key_exists($this->cname, $request->cookie)) {
+            $this->session_key = $request->cookie[$this->cname];
+            $this->get_key($request);
+            $this->existing = true;
+            $this->start($request, true);
+            if ($this->active) {
+                $this->check_fingerprint($request);
+            }
+        }
+        return $this->is_active();
+    }
+
+    public function start($request, $existing_session = false) {
+        if (!$existing_session) {
+            return;
+        }
+        $file = $this->session_file($this->session_key);
+        if (!is_readable($file)) {
+            $this->active = false;
+            return;
+        }
+        $data = $this->plaintext(file_get_contents($file));
+        if (is_array($data)) {
+            $this->data = $data;
+            $this->active = true;
+        } else {
+            $this->active = false;
+        }
+    }
+
+    public function get($name, $default = false, $user = false) {
+        if ($user) {
+            return (array_key_exists('user_data', $this->data) && array_key_exists($name, $this->data['user_data']))
+                ? $this->data['user_data'][$name] : $default;
+        }
+        return array_key_exists($name, $this->data) ? $this->data[$name] : $default;
+    }
+
+    public function set($name, $value, $user = false) {
+        if ($user) {
+            $this->data['user_data'][$name] = $value;
+        } else {
+            $this->data[$name] = $value;
+        }
+    }
+
+    public function del($name) {
+        if (array_key_exists($name, $this->data)) {
+            unset($this->data[$name]);
+            return true;
+        }
+        return false;
+    }
+
+    public function end() {
+        if ($this->active) {
+            @file_put_contents($this->session_file($this->session_key), $this->ciphertext($this->data));
+            $this->active = false;
+        }
+    }
+
+    public function destroy($request) {
+        @unlink($this->session_file($this->session_key));
+        $this->delete_cookie($request, $this->cname);
+        $this->delete_cookie($request, 'hm_id');
+        $this->active = false;
+    }
+}
+
+class Custom_Auth extends Hm_Auth_DB {
+
+    /**
+     * @param string $user username (the Dolibarr login)
+     * @param string $pass "{timestamp}.{hmac}" token from
+     *                      CyphtManager::generateSsoLoginToken(), not a
+     *                      real password
+     * @return bool true if the token is a valid, fresh SSO assertion
+     */
+    public function check_credentials($user, $pass) {
+        $secret = env('SSO_SHARED_SECRET', '');
+        if ($secret === '' || strpos($pass, '.') === false) {
+            return false;
+        }
+
+        list($timestamp, $signature) = explode('.', $pass, 2);
+        if (!ctype_digit($timestamp)) {
+            return false;
+        }
+
+        // Anti-replay window: a captured token is only valid for a minute.
+        if (abs(time() - (int) $timestamp) > 60) {
+            return false;
+        }
+
+        $expected = hash_hmac('sha256', $user.'|'.$timestamp, $secret);
+
+        return hash_equals($expected, $signature);
+    }
+}
+PHP;
+	}
+
+	/**
+	 * Write the generated Custom_Auth/Custom_Session override to Cypht's
+	 * modules/site/lib.php. Must run on every build, same reasoning as
+	 * ensureCyphtVendorBridge(): Composer fully re-extracts a package
+	 * directory whenever its locked version changes, which would silently
+	 * wipe this out.
+	 *
+	 * @return bool
+	 */
+	private function writeSiteAuthOverride()
+	{
+		$path = $this->getCyphtPath() . '/modules/site/lib.php';
+
+		if (file_put_contents($path, $this->buildSiteAuthOverrideContent()) === false) {
+			$this->error = 'Could not write ' . $path;
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Patches a genuine upstream Cypht bug, not something we introduced:
+	 * most functions in modules/core/functions.php are wrapped in
+	 * "if (!hm_exists('name')) { function name(...) {...} }" so the file
+	 * survives being require()'d more than once in the same process - but
+	 * a handful are missing that guard (found by scanning the file:
+	 * get_special_folders, privacy_setting_callback,
+	 * getSettingsSectionOutput, isPageConfigured as of Cypht 2.11.1).
+	 * Harmless normally, because nothing used to load Cypht's modules
+	 * twice in one PHP process - but performSsoLogin()'s "functional
+	 * login" call (modules/api_login/api.php) does exactly that, causing
+	 * a fatal "Cannot redeclare ...()" the moment SSO is used.
+	 *
+	 * Rather than hardcode that specific list (fragile - the exact set
+	 * could shift on a future Cypht release), this scans the file with
+	 * PHP's own tokenizer and wraps *every* top-level unguarded function
+	 * the same way its already-guarded neighbors are, skipping anything
+	 * already wrapped so repeat builds stay idempotent.
+	 *
+	 * Applied by the build process (like writeSiteAuthOverride() above)
+	 * rather than hand-edited in vendor/, so "composer install" re-fetching
+	 * this package never silently reverts it.
+	 *
+	 * @return bool
+	 */
+	private function patchCoreFunctionsGuard()
+	{
+		$path = $this->getCyphtPath() . '/modules/core/functions.php';
+		if (!is_readable($path)) {
+			return true; // nothing to patch yet - composer install would have already failed if this matters
+		}
+
+		$content = file_get_contents($path);
+		if ($content === false) {
+			$this->error = 'Could not read ' . $path;
+			return false;
+		}
+
+		$patched = $this->wrapUnguardedTopLevelFunctions($content);
+		if ($patched === $content) {
+			return true; // nothing unguarded found (or already patched)
+		}
+
+		if (file_put_contents($path, $patched) === false) {
+			$this->error = 'Could not write ' . $path;
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Wrap every top-level "function name(...) { ... }" in $content that
+	 * isn't already guarded by an immediately-preceding
+	 * "hm_exists('name')" check, in "if (!hm_exists('name')) { ... }" -
+	 * matching the convention the file itself already uses elsewhere.
+	 * Skips anonymous closures (no name) and anything nested inside a
+	 * class body (class method redeclaration is a different failure mode
+	 * this guard doesn't apply to, and none of the files this is used on
+	 * currently define classes, but this stays defensive against that).
+	 *
+	 * Uses PHP's own tokenizer instead of brace-counting by hand so
+	 * function boundaries are found correctly regardless of braces
+	 * appearing inside strings/comments.
+	 *
+	 * @param string $content
+	 * @return string Patched content (identical to input if nothing to do)
+	 */
+	private function wrapUnguardedTopLevelFunctions($content)
+	{
+		$tokens = token_get_all($content);
+		$count = count($tokens);
+		$result = '';
+		$classDepth = null; // brace depth at which the current class body started, or null if not in one
+		$braceDepth = 0;
+		$i = 0;
+
+		while ($i < $count) {
+			$token = $tokens[$i];
+			$text = is_array($token) ? $token[1] : $token;
+
+			if ($text === '{') {
+				$braceDepth++;
+			} elseif ($text === '}') {
+				$braceDepth--;
+				if ($classDepth !== null && $braceDepth === $classDepth) {
+					$classDepth = null; // left the class body
+				}
+			}
+
+			if (is_array($token) && $token[0] === T_CLASS) {
+				$classDepth = $braceDepth; // depth *before* the class's own "{" is seen
+			}
+
+			if (is_array($token) && $token[0] === T_FUNCTION && $classDepth === null) {
+				$j = $i + 1;
+				while ($j < $count && is_array($tokens[$j]) && $tokens[$j][0] === T_WHITESPACE) {
+					$j++;
+				}
+				$name = (isset($tokens[$j]) && is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) ? $tokens[$j][1] : null;
+
+				if ($name !== null) {
+					// Find the end of this function (its own matching closing brace).
+					$k = $j;
+					$depth = 0;
+					$started = false;
+					while ($k < $count) {
+						$t = is_array($tokens[$k]) ? $tokens[$k][1] : $tokens[$k];
+						if ($t === '{') {
+							$depth++;
+							$started = true;
+						} elseif ($t === '}') {
+							$depth--;
+						}
+						$k++;
+						if ($started && $depth === 0) {
+							break;
+						}
+					}
+
+					$funcSource = '';
+					for ($m = $i; $m < $k; $m++) {
+						$funcSource .= is_array($tokens[$m]) ? $tokens[$m][1] : $tokens[$m];
+					}
+
+					$alreadyGuarded = (strpos(substr($result, -200), "hm_exists('{$name}')") !== false);
+					$result .= $alreadyGuarded
+						? $funcSource
+						: "if (!hm_exists('{$name}')) {\n" . $funcSource . "}\n";
+
+					// Keep braceDepth consistent with however many '{'/'}' this
+					// function's own source actually contained.
+					$braceDepth += (substr_count($funcSource, '{') - substr_count($funcSource, '}'));
+					$i = $k;
+					continue;
+				}
+			}
+
+			$result .= $text;
+			$i++;
+		}
+
+		return $result;
+	}
+
+	/**
+	 * Log the given Dolibarr user into Cypht via its official "functional
+	 * login" integration option (same-subdomain SSO, see
+	 * https://github.com/cypht-org/cypht/wiki/API-Login) - calls
+	 * cypht_login() directly in-process instead of round-tripping through
+	 * an HTTP POST, setting the hm_id/hm_session cookies on the current
+	 * response. Must be called before any HTML output.
+	 *
+	 * @param string $login Dolibarr username to log into Cypht as
+	 * @param string $cyphtUrl Absolute URL of the published Cypht app (used
+	 *                          only to derive the cookie domain/path)
+	 * @return bool true if Cypht accepted the SSO token
+	 */
+	public function performSsoLogin($login, $cyphtUrl)
+	{
+		$apiFile = $this->getCyphtPath() . '/modules/api_login/api.php';
+		if (!is_readable($apiFile)) {
+			$this->error = 'modules/api_login/api.php not found - was the "api_login" module built into CYPHT_MODULES?';
+			return false;
+		}
+
+		require_once $apiFile;
+
+		$token = $this->generateSsoLoginToken($login);
+
+		return cypht_login($login, $token, $cyphtUrl);
 	}
 
 	/**
@@ -947,6 +1398,18 @@ class CyphtManager
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit("vendor/ bridge shim in place (Cypht installed as a flat dependency, see comment in the file).\n");
+
+		if (!$this->writeSiteAuthOverride()) {
+			$emit($this->error . "\n");
+			return array('success' => false, 'output' => $log, 'error' => $this->error);
+		}
+		$emit("Dolibarr SSO auth override written to modules/site/lib.php.\n");
+
+		if (!$this->patchCoreFunctionsGuard()) {
+			$emit($this->error . "\n");
+			return array('success' => false, 'output' => $log, 'error' => $this->error);
+		}
+		$emit("Patched missing hm_exists() guard around get_special_folders() (upstream gap, needed for SSO).\n");
 
 		$phpBinary = $this->findPhpBinary();
 		if ($phpBinary === null) {

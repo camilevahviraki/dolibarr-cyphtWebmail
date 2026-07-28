@@ -18,12 +18,14 @@
 /**
  * \file        cyphtWebmailindex.php
  * \ingroup     cyphtWebmail
- * \brief       Entry point reached from the top menu. For this POC there is
- *              no session bridging yet: Cypht shows its own login screen
- *              (IMAP_AUTH_SERVER configured on the setup page), the user
- *              logs in with their real mailbox credentials. Dolibarr's job
- *              here is just auth-gating access to the page and embedding
- *              the already-built Cypht app.
+ * \brief       Entry point reached from the top menu. Logs the current
+ *              Dolibarr user into Cypht via its official same-subdomain
+ *              "functional login" SSO option (see
+ *              CyphtManager::performSsoLogin()) before embedding the
+ *              already-built Cypht app, so the iframe opens already
+ *              authenticated as that user. Each user still adds their
+ *              real IMAP mailbox separately via Cypht's own Servers page,
+ *              exactly as Tiki's integration does.
  */
 
 // Load Dolibarr environment
@@ -72,6 +74,16 @@ if (!isModEnabled('cyphtwebmail')) {
 
 $manager = new CyphtManager($db);
 
+// Must happen before any HTML output (llxHeader() included): SSO login
+// sets Cypht's hm_id/hm_session cookies via setcookie(), which silently
+// fails once headers have already been sent.
+$ssoOk = false;
+$publicUrl = '';
+if ($manager->isPublished()) {
+	$publicUrl = dol_buildpath('/cyphtWebmail/public/index.php', 1);
+	$ssoOk = $manager->performSsoLogin($user->login, $publicUrl);
+}
+
 llxHeader('', $langs->trans("CyphtWebmailArea"), '', '', 0, 0, '', '', '', 'mod-cyphtwebmail page-index');
 
 if (!$manager->isPublished()) {
@@ -82,7 +94,11 @@ if (!$manager->isPublished()) {
 	print '</a>';
 	print '</div>';
 } else {
-	$publicUrl = dol_buildpath('/cyphtWebmail/public/index.php', 1);
+	if (!$ssoOk && $manager->error) {
+		// Non-fatal: fall back to Cypht's own login screen rather than
+		// blocking access to the page entirely.
+		print '<div class="warning" style="padding: 15px;">'.dol_escape_htmltag($manager->error).'</div>';
+	}
 	print '<iframe src="'.dol_escape_htmltag($publicUrl).'" '.
 		'style="width:100%; height: calc(100vh - 220px); min-height: 500px; border: none;" '.
 		'title="Cypht Webmail"></iframe>';
