@@ -56,7 +56,12 @@ if (!$user->admin) {
 	exit;
 }
 
-if (GETPOST('token', 'alpha') !== newToken()) {
+// currentToken(), not newToken(): newToken() regenerates the session's
+// stored token as a side effect of being called, so comparing against it
+// here would rotate the token during the very check meant to verify it -
+// guaranteeing a mismatch on every single request. currentToken() reads
+// the value the form was actually rendered with, without changing it.
+if (GETPOST('token', 'alpha') !== currentToken()) {
 	http_response_code(403);
 	echo "Invalid token";
 	exit;
