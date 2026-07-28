@@ -168,7 +168,7 @@ print '<div class="center" style="margin-top: 10px;">';
 // the cheap first line of defense plus honest feedback that something is
 // happening, since the page otherwise gives no sign of life while it builds.
 print '<form id="cypht-build-form" action="./build/build.php">';
-print '<input type="hidden" name="token" value="'.newToken().'">';
+print '<input type="hidden" name="token" value="'.$formToken.'">';
 print '<input type="hidden" name="action" value="build">';
 print '<button type="submit" class="button" data-loading-text="'.$langs->trans("CyphtWebmailBuilding").'">'.$langs->trans("CyphtWebmailGenerateButton").'</button>';
 print '</form>';
