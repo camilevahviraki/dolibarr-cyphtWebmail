@@ -76,9 +76,13 @@ $buildResult = $manager->runConfigGen(function ($chunk) use ($manager) {
     $manager->cyphtwebmail_flush_now();
 });
 
-if (session_id()) {
-    session_start();
-}
+// Not reopening the session here: by this point output has already been
+// streamed to the browser (that's the whole point), so headers are always
+// already sent and session_start() would only ever produce a "Session
+// cannot be started after headers have already been sent" warning that
+// bleeds into the build log. Nothing after this point needs $_SESSION -
+// this request just reports success/failure and ends; the next real page
+// load starts its own session normally.
 
 if (!$buildResult['success']) {
     http_response_code(500);
