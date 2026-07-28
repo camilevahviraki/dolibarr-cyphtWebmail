@@ -174,7 +174,7 @@ print '<button type="submit" class="button" data-loading-text="'.$langs->trans("
 print '</form>';
 print '</div>';
 
-print '<pre id="cyphtwebmail-log"></pre>';
+print '<pre id="cyphtwebmail-log" style="background:#1e1e1e; color:#d4d4d4; font-family:Consolas,\'Courier New\',monospace; font-size:12px; line-height:1.5; padding:12px 14px; max-height:500px; overflow:auto; border-radius:6px; border:1px solid #333; white-space:pre-wrap; word-break:break-all; margin-top:10px;"></pre>';
 
 print '<script src="'.dol_buildpath('/cyphtWebmail/js/admin/setup.js', 1).'"></script>';
 
