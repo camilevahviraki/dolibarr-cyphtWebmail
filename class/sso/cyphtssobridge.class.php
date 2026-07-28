@@ -149,7 +149,25 @@ class Custom_Session extends Hm_Session {
     private $existing = false;
 
     private function session_dir() {
-        $base = dirname(rtrim(env('USER_SETTINGS_DIR', sys_get_temp_dir()), '/\\'));
+        // Hm_Environment::get() reads array_merge($_ENV, $_SERVER) - real
+        // per-request PHP superglobals. The global env() helper instead
+        // does getenv() ?: default, which reads the *process-wide* OS
+        // environment table populated via putenv() (Hm_Environment::load()
+        // turns on Symfony Dotenv's usePutenv(true)). Symfony's own source
+        // warns "putenv() is not thread safe" - and on Windows, Apache's
+        // mpm_winnt runs one process with many threads sharing that same
+        // process-wide table, so a concurrent request's putenv() unset/set
+        // pair (Dotenv unsets a key before resetting it) can be observed
+        // mid-flight by another thread's getenv() call. That's what was
+        // causing this to intermittently fall back to sys_get_temp_dir()
+        // instead of the real USER_SETTINGS_DIR on some requests - Cypht
+        // then looked in the wrong directory, found no session file,
+        // reported "inactive", and the client force-reloaded (see
+        // public/site.js's logout()-on-!router_login_state). $_ENV itself
+        // is set unconditionally by Dotenv::populate() regardless of the
+        // putenv race (see vendor/symfony/dotenv/Dotenv.php), so reading
+        // it directly via Hm_Environment::get() sidesteps the race.
+        $base = dirname(rtrim(Hm_Environment::get('USER_SETTINGS_DIR', sys_get_temp_dir()), '/\\'));
         $dir = $base.'/sso_sessions';
         if (!is_dir($dir)) {
             @mkdir($dir, 0700, true);
@@ -326,7 +344,10 @@ class Custom_Auth extends Hm_Auth_DB {
      * @return bool true if the token is a valid, fresh SSO assertion
      */
     public function check_credentials($user, $pass) {
-        $secret = env('SSO_SHARED_SECRET', '');
+        // See the comment in Custom_Session::session_dir() above - the
+        // global env() helper reads the process-wide (not thread-safe)
+        // putenv() table, so it must be avoided here too.
+        $secret = Hm_Environment::get('SSO_SHARED_SECRET', '');
         if ($secret === '' || strpos($pass, '.') === false) {
             return false;
         }
