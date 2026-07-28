@@ -43,6 +43,33 @@ class CyphtManager
 	public $error = '';
 
 	/**
+	 * Debug log living *inside the module folder itself* (not under
+	 * DOL_DATA_ROOT, which may sit outside whatever directory is being
+	 * inspected) so its content is always directly readable without going
+	 * through the browser or asking someone to relay what they see on
+	 * screen. Every runProcess() call appends the exact command run, its
+	 * PID, and periodic "still running" heartbeats while it works, plus
+	 * how it ended. Overwritten at the start of each runConfigGen() call
+	 * so it only ever reflects the most recent attempt.
+	 *
+	 * @return string
+	 */
+	private function getDebugLogPath()
+	{
+		return $this->getModuleRoot() . '/debug.log';
+	}
+
+	/**
+	 * @param string $line
+	 * @return void
+	 */
+	private function debugLog($line)
+	{
+		$timestamp = date('Y-m-d H:i:s');
+		@file_put_contents($this->getDebugLogPath(), "[{$timestamp}] {$line}\n", FILE_APPEND);
+	}
+
+	/**
 	 * @param DoliDB $db Database handler
 	 */
 	public function __construct($db)
@@ -67,7 +94,7 @@ class CyphtManager
 	 */
 	public function getCyphtPath()
 	{
-		return $this->getModuleRoot().'/vendor/jason-munro/cypht';
+		return $this->getModuleRoot() . '/vendor/jason-munro/cypht';
 	}
 
 	/**
@@ -78,7 +105,7 @@ class CyphtManager
 	 */
 	public function getCyphtSitePath()
 	{
-		return $this->getCyphtPath().'/site';
+		return $this->getCyphtPath() . '/site';
 	}
 
 	/**
@@ -90,7 +117,7 @@ class CyphtManager
 	 */
 	public function getPublicPath()
 	{
-		return $this->getModuleRoot().'/public';
+		return $this->getModuleRoot() . '/public';
 	}
 
 	/**
@@ -102,11 +129,11 @@ class CyphtManager
 	 */
 	public function getDataDir()
 	{
-		$dir = DOL_DATA_ROOT.'/cyphtWebmail';
+		$dir = DOL_DATA_ROOT . '/cyphtWebmail';
 
-		require_once DOL_DOCUMENT_ROOT.'/core/lib/files.lib.php';
-		dol_mkdir($dir.'/users');
-		dol_mkdir($dir.'/attachments');
+		require_once DOL_DOCUMENT_ROOT . '/core/lib/files.lib.php';
+		dol_mkdir($dir . '/users');
+		dol_mkdir($dir . '/attachments');
 
 		return $dir;
 	}
@@ -120,7 +147,7 @@ class CyphtManager
 	 */
 	public function getInstalledVersion()
 	{
-		$installedJson = $this->getModuleRoot().'/vendor/composer/installed.json';
+		$installedJson = $this->getModuleRoot() . '/vendor/composer/installed.json';
 		if (!file_exists($installedJson)) {
 			return null;
 		}
@@ -185,7 +212,7 @@ class CyphtManager
 	 */
 	public function isPublished()
 	{
-		return file_exists($this->getPublicPath().'/index.php');
+		return file_exists($this->getPublicPath() . '/index.php');
 	}
 
 	/**
@@ -208,8 +235,8 @@ class CyphtManager
 			'IMAP_AUTH_PORT'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_PORT', '993'),
 			'IMAP_AUTH_TLS'    => getDolGlobalString('CYPHTWEBMAIL_IMAP_TLS', 'true'),
 			'USER_CONFIG_TYPE' => 'file',
-			'USER_SETTINGS_DIR' => $dataDir.'/users',
-			'ATTACHMENT_DIR'   => $dataDir.'/attachments',
+			'USER_SETTINGS_DIR' => $dataDir . '/users',
+			'ATTACHMENT_DIR'   => $dataDir . '/attachments',
 			'ENABLE_REDIS'     => 'false',
 			'ENABLE_MEMCACHED' => 'false',
 			'ENABLE_DEBUG'     => 'false',
@@ -236,17 +263,17 @@ class CyphtManager
 	public function writeEnvFile(array $overrides)
 	{
 		$cyphtPath = $this->getCyphtPath();
-		$envFile = $cyphtPath.'/.env';
-		$source = file_exists($envFile) ? $envFile : $cyphtPath.'/.env.example';
+		$envFile = $cyphtPath . '/.env';
+		$source = file_exists($envFile) ? $envFile : $cyphtPath . '/.env.example';
 
 		if (!file_exists($source)) {
-			$this->error = 'Neither .env nor .env.example found in '.$cyphtPath.'. Is Cypht actually installed under vendor/?';
+			$this->error = 'Neither .env nor .env.example found in ' . $cyphtPath . '. Is Cypht actually installed under vendor/?';
 			return false;
 		}
 
 		$lines = file($source, FILE_IGNORE_NEW_LINES);
 		if ($lines === false) {
-			$this->error = 'Could not read '.$source;
+			$this->error = 'Could not read ' . $source;
 			return false;
 		}
 
@@ -255,20 +282,20 @@ class CyphtManager
 			if (preg_match('/^([A-Z0-9_]+)=/', $line, $m)) {
 				$key = $m[1];
 				if (array_key_exists($key, $overrides)) {
-					$lines[$i] = $key.'='.$overrides[$key];
+					$lines[$i] = $key . '=' . $overrides[$key];
 					$seen[$key] = true;
 				}
 			}
 		}
 		foreach ($overrides as $key => $value) {
 			if (empty($seen[$key])) {
-				$lines[] = $key.'='.$value;
+				$lines[] = $key . '=' . $value;
 			}
 		}
 
-		$result = file_put_contents($envFile, implode("\n", $lines)."\n");
+		$result = file_put_contents($envFile, implode("\n", $lines) . "\n");
 		if ($result === false) {
-			$this->error = 'Could not write '.$envFile.' (permissions?)';
+			$this->error = 'Could not write ' . $envFile . ' (permissions?)';
 			return false;
 		}
 
@@ -297,9 +324,9 @@ class CyphtManager
 			return array(
 				'success' => false,
 				'output' => '',
-				'error' => 'proc_open() is disabled on this server (common on shared hosting). '.
-					'Ask your host to enable proc_open/exec, or run this manually over SSH: '.
-					'cd '.$cwd.' && php scripts/config_gen.php',
+				'error' => 'proc_open() is disabled on this server (common on shared hosting). ' .
+					'Ask your host to enable proc_open/exec, or run this manually over SSH: ' .
+					'cd ' . $cwd . ' && php scripts/config_gen.php',
 				'exitcode' => -1,
 			);
 		}
@@ -311,15 +338,22 @@ class CyphtManager
 			2 => array('pipe', 'w'),
 		);
 
+		$this->debugLog("STARTING: {$cmdline}");
+		$this->debugLog("  cwd: {$cwd}");
+
 		$process = proc_open($cmdline, $descriptorspec, $pipes, $cwd);
 		if (!is_resource($process)) {
+			$this->debugLog("  proc_open() itself returned false/failed - command never started at all.");
 			return array(
 				'success' => false,
 				'output' => '',
-				'error' => 'Unable to start process for: '.$cmdline,
+				'error' => 'Unable to start process for: ' . $cmdline,
 				'exitcode' => -1,
 			);
 		}
+
+		$startStatus = proc_get_status($process);
+		$this->debugLog("  proc_open succeeded, pid={$startStatus['pid']}, running=" . ($startStatus['running'] ? 'yes' : 'no'));
 
 		fclose($pipes[0]);
 
@@ -338,6 +372,9 @@ class CyphtManager
 		$start = time();
 		$timeoutSeconds = 180;
 		$timedOut = false;
+		$cancelled = false;
+		$cancelFlag = $this->getCancelFlagPath();
+		$lastHeartbeat = 0;
 
 		while (true) {
 			$newOut = stream_get_contents($pipes[1]);
@@ -345,17 +382,44 @@ class CyphtManager
 			$stdout .= $newOut;
 			$stderr .= $newErr;
 
+			if ($newOut !== '' || $newErr !== '') {
+				$this->debugLog("  output received (" . strlen($newOut) . " stdout / " . strlen($newErr) . " stderr bytes)");
+			}
+
 			if ($onChunk !== null && ($newOut !== '' || $newErr !== '')) {
-				$onChunk($newOut.$newErr);
+				$onChunk($newOut . $newErr);
 			}
 
 			$status = proc_get_status($process);
 			if (!$status['running']) {
+				$this->debugLog("  process exited, exitcode={$status['exitcode']}");
+				break;
+			}
+
+			$elapsed = time() - $start;
+			if ($elapsed >= $lastHeartbeat + 5) {
+				$lastHeartbeat = $elapsed;
+				$this->debugLog("  still running after {$elapsed}s (pid={$status['pid']}), total output so far: " . strlen($stdout) . " stdout / " . strlen($stderr) . " stderr bytes");
+			}
+
+			// The Cancel button (a separate request) drops this flag file
+			// rather than trying to kill the process itself - this request
+			// is the one that actually knows the PID/resource, so it does
+			// the killing, it just needs telling to.
+			if (file_exists($cancelFlag)) {
+				$cancelled = true;
+				$this->debugLog("  cancel flag detected after {$elapsed}s - killing pid {$status['pid']}");
+				@unlink($cancelFlag);
+				if (stripos(PHP_OS, 'WIN') === 0 && function_exists('exec')) {
+					@exec('taskkill /F /T /PID ' . ((int) $status['pid']) . ' 2>NUL');
+				}
+				proc_terminate($process, 9);
 				break;
 			}
 
 			if ((time() - $start) > $timeoutSeconds) {
 				$timedOut = true;
+				$this->debugLog("  TIMEOUT after {$timeoutSeconds}s - killing pid {$status['pid']}");
 				// On Windows, proc_open() launches the command through cmd.exe,
 				// so proc_terminate() only kills that cmd.exe wrapper - the
 				// actual php.exe (or composer) child keeps running as an
@@ -364,7 +428,7 @@ class CyphtManager
 				// PHP knows about.
 				if (stripos(PHP_OS, 'WIN') === 0 && function_exists('exec')) {
 					$pid = $status['pid'];
-					@exec('taskkill /F /T /PID '.((int) $pid).' 2>NUL');
+					@exec('taskkill /F /T /PID ' . ((int) $pid) . ' 2>NUL');
 				}
 				proc_terminate($process, 9);
 				break;
@@ -380,21 +444,36 @@ class CyphtManager
 		$stdout .= $finalOut;
 		$stderr .= $finalErr;
 		if ($onChunk !== null && ($finalOut !== '' || $finalErr !== '')) {
-			$onChunk($finalOut.$finalErr);
+			$onChunk($finalOut . $finalErr);
 		}
 
 		fclose($pipes[1]);
 		fclose($pipes[2]);
 		$exitCode = proc_close($process);
 
-		if ($timedOut) {
+		if ($cancelled) {
+			$this->debugLog("FINISHED (cancelled): {$cmdline}");
 			return array(
 				'success' => false,
 				'output' => $stdout,
-				'error' => trim($stderr)."\n[Timed out after {$timeoutSeconds}s and was terminated]",
+				'error' => trim($stderr) . "\n[Cancelled by user]",
+				'exitcode' => -1,
+				'cancelled' => true,
+			);
+		}
+
+		if ($timedOut) {
+			$this->debugLog("FINISHED (timed out): {$cmdline}");
+			return array(
+				'success' => false,
+				'output' => $stdout,
+				'error' => trim($stderr) . "\n[Timed out after {$timeoutSeconds}s and was terminated]",
 				'exitcode' => -1,
 			);
 		}
+
+		$this->debugLog("FINISHED (exitcode={$exitCode}): {$cmdline}");
+		$this->debugLog("  total stdout: " . strlen($stdout) . " bytes, stderr: " . strlen($stderr) . " bytes");
 
 		return array(
 			'success' => ($exitCode === 0),
@@ -437,7 +516,7 @@ class CyphtManager
 		// add it to PATH, so "where php" above can legitimately fail.
 		if (!empty($_SERVER['DOCUMENT_ROOT'])) {
 			$xamppRoot = dirname(rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT']), '/'));
-			$candidate = $xamppRoot.'/php/php.exe';
+			$candidate = $xamppRoot . '/php/php.exe';
 			if (file_exists($candidate)) {
 				return $candidate;
 			}
@@ -458,7 +537,7 @@ class CyphtManager
 	 */
 	private function findComposerBinary()
 	{
-		$pharPath = $this->getModuleRoot().'/composer.phar';
+		$pharPath = $this->getModuleRoot() . '/composer.phar';
 		if (file_exists($pharPath)) {
 			$phpBinary = $this->findPhpBinary();
 			if ($phpBinary !== null) {
@@ -501,8 +580,8 @@ class CyphtManager
 			if ($item === '.' || $item === '..') {
 				continue;
 			}
-			$srcPath = $src.'/'.$item;
-			$dstPath = $dst.'/'.$item;
+			$srcPath = $src . '/' . $item;
+			$dstPath = $dst . '/' . $item;
 			if (is_dir($srcPath)) {
 				$this->copyRecursive($srcPath, $dstPath);
 			} else {
@@ -523,7 +602,7 @@ class CyphtManager
 	{
 		$sitePath = $this->getCyphtSitePath();
 		if (!is_dir($sitePath)) {
-			$this->error = 'Build succeeded but no site/ directory was produced at '.$sitePath;
+			$this->error = 'Build succeeded but no site/ directory was produced at ' . $sitePath;
 			return false;
 		}
 
@@ -535,7 +614,7 @@ class CyphtManager
 
 		$this->copyRecursive($sitePath, $publicPath);
 
-		return file_exists($publicPath.'/index.php');
+		return file_exists($publicPath . '/index.php');
 	}
 
 	/**
@@ -549,7 +628,7 @@ class CyphtManager
 			if ($item === '.' || $item === '..') {
 				continue;
 			}
-			$path = $dir.'/'.$item;
+			$path = $dir . '/' . $item;
 			if (is_dir($path)) {
 				$this->deleteRecursive($path);
 			} else {
@@ -579,26 +658,26 @@ class CyphtManager
 	 */
 	private function ensureCyphtVendorBridge()
 	{
-		$bridgeDir = $this->getCyphtPath().'/vendor';
-		$bridgeFile = $bridgeDir.'/autoload.php';
+		$bridgeDir = $this->getCyphtPath() . '/vendor';
+		$bridgeFile = $bridgeDir . '/autoload.php';
 
 		if (!is_dir($bridgeDir) && !mkdir($bridgeDir, 0755, true) && !is_dir($bridgeDir)) {
-			$this->error = 'Could not create '.$bridgeDir;
+			$this->error = 'Could not create ' . $bridgeDir;
 			return false;
 		}
 
-		$content = "<?php\n".
-			"// Auto-generated by CyphtManager::ensureCyphtVendorBridge() - do not edit,\n".
-			"// this file is recreated on every build and any manual changes will be lost.\n".
-			"//\n".
-			"// Cypht is installed as a flat Composer dependency of the cyphtWebmail module,\n".
-			"// so its own dependencies live in the module's shared vendor/, not a nested\n".
-			"// one here. This forwards Cypht's own scripts (config_gen.php, index.php) to\n".
-			"// that shared autoloader.\n".
+		$content = "<?php\n" .
+			"// Auto-generated by CyphtManager::ensureCyphtVendorBridge() - do not edit,\n" .
+			"// this file is recreated on every build and any manual changes will be lost.\n" .
+			"//\n" .
+			"// Cypht is installed as a flat Composer dependency of the cyphtWebmail module,\n" .
+			"// so its own dependencies live in the module's shared vendor/, not a nested\n" .
+			"// one here. This forwards Cypht's own scripts (config_gen.php, index.php) to\n" .
+			"// that shared autoloader.\n" .
 			"return require dirname(__DIR__, 3).'/autoload.php';\n";
 
 		if (file_put_contents($bridgeFile, $content) === false) {
-			$this->error = 'Could not write '.$bridgeFile;
+			$this->error = 'Could not write ' . $bridgeFile;
 			return false;
 		}
 
@@ -618,7 +697,40 @@ class CyphtManager
 	 */
 	private function getLockFilePath()
 	{
-		return $this->getDataDir().'/build.lock';
+		return $this->getDataDir() . '/build.lock';
+	}
+
+	/**
+	 * Path to the flag file used to ask a currently-running build to stop.
+	 * Dropped by requestCancel() (called from the Cancel button's AJAX
+	 * request) and polled by runProcess()'s loop in the *other*, actually
+	 * running request - that request is the one holding the real process
+	 * resource, so it has to be the one to kill it; this file is just the
+	 * signal between the two requests.
+	 *
+	 * @return string
+	 */
+	private function getCancelFlagPath()
+	{
+		return $this->getDataDir() . '/build.cancel';
+	}
+
+	/**
+	 * Called from the Cancel button. Does not kill anything itself - it
+	 * can't, it has no handle on the other request's process - it just
+	 * drops the flag that request's runProcess() loop checks every ~150ms.
+	 *
+	 * @return array{success:bool,message:string}
+	 */
+	public function requestCancel()
+	{
+		if (!file_exists($this->getLockFilePath())) {
+			return array('success' => false, 'message' => 'No build appears to be running.');
+		}
+
+		file_put_contents($this->getCancelFlagPath(), (string) time());
+
+		return array('success' => true, 'message' => 'Cancel requested - the current step will stop shortly.');
 	}
 
 	/**
@@ -633,6 +745,13 @@ class CyphtManager
 	 */
 	public function runConfigGen(callable $onProgress = null)
 	{
+		// Reset so this file only ever reflects the most recent attempt -
+		// readable directly from the module folder without needing anyone
+		// to relay what happened.
+		@file_put_contents($this->getDebugLogPath(), '');
+		$this->debugLog('=== runConfigGen() starting ===');
+		$this->debugLog('PHP version: ' . phpversion() . ', OS: ' . PHP_OS . ', SAPI: ' . php_sapi_name());
+
 		$lockFile = $this->getLockFilePath();
 
 		if (file_exists($lockFile)) {
@@ -647,19 +766,23 @@ class CyphtManager
 				return array(
 					'success' => false,
 					'output' => '',
-					'error' => 'A build is already running (started '.$age.'s ago). '.
-						'Wait for it to finish rather than clicking Generate again - '.
-						'running two builds at once competes for CPU/disk and is what '.
-						'makes the whole server feel like it froze.',
+					'error' => 'A build is already running (started ' . $age . 's ago). ' .
+						'Wait for it to finish rather than clicking Generate again.',
 				);
 			}
 		}
+
+		// Clear out any stale cancel flag from a previous run before we
+		// start - otherwise a leftover flag would cancel this new build
+		// within the first poll tick.
+		@unlink($this->getCancelFlagPath());
 
 		file_put_contents($lockFile, (string) time());
 		try {
 			return $this->runConfigGenSteps($onProgress);
 		} finally {
 			@unlink($lockFile);
+			@unlink($this->getCancelFlagPath());
 		}
 	}
 
@@ -712,8 +835,11 @@ class CyphtManager
 			);
 			$emit(sprintf("\n[composer install finished in %.1fs]\n", microtime(true) - $stepStart));
 
+			if (!empty($installResult['cancelled'])) {
+				return array('success' => false, 'output' => $log, 'error' => 'Build cancelled.');
+			}
 			if (!$installResult['success']) {
-				$emit("\ncomposer install failed (exit code ".$installResult['exitcode'].").\n");
+				$emit("\ncomposer install failed (exit code " . $installResult['exitcode'] . ").\n");
 				return array('success' => false, 'output' => $log, 'error' => 'composer install failed, see log.');
 			}
 		} elseif (is_dir($cyphtPath)) {
@@ -723,8 +849,8 @@ class CyphtManager
 			return array(
 				'success' => false,
 				'output' => $log,
-				'error' => 'Cannot install Cypht: no Composer found and vendor/jason-munro/cypht is missing. '.
-					'Install Composer on this server, or run "composer install" manually in: '.$moduleRoot,
+				'error' => 'Cannot install Cypht: no Composer found and vendor/jason-munro/cypht is missing. ' .
+					'Install Composer on this server, or run "composer install" manually in: ' . $moduleRoot,
 			);
 		}
 
@@ -737,31 +863,34 @@ class CyphtManager
 		$emit("\n== Step 2/3: php scripts/config_gen.php ==\n");
 
 		if (!$this->writeEnvFile($this->buildEnvOverrides())) {
-			$emit($this->error."\n");
+			$emit($this->error . "\n");
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 
 		if (!$this->ensureCyphtVendorBridge()) {
-			$emit($this->error."\n");
+			$emit($this->error . "\n");
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit("vendor/ bridge shim in place (Cypht installed as a flat dependency, see comment in the file).\n");
 
 		$phpBinary = $this->findPhpBinary();
 		if ($phpBinary === null) {
-			$emit("No usable PHP CLI executable found. PHP is running as an Apache module here, so PHP_BINARY ".
-				"points at httpd.exe, not php.exe - and no 'php' was found on PATH or at the usual XAMPP location ".
+			$emit("No usable PHP CLI executable found. PHP is running as an Apache module here, so PHP_BINARY " .
+				"points at httpd.exe, not php.exe - and no 'php' was found on PATH or at the usual XAMPP location " .
 				"(<xampp>/php/php.exe). Add php.exe to your system PATH, or drop a composer.phar in the module root.\n");
 			return array('success' => false, 'output' => $log, 'error' => 'No PHP CLI binary found, see log.');
 		}
-		$emit("Using PHP CLI: ".$phpBinary."\n");
+		$emit("Using PHP CLI: " . $phpBinary . "\n");
 
 		$stepStart = microtime(true);
 		$result = $this->runProcess(array($phpBinary, 'scripts/config_gen.php'), $cyphtPath, $emit);
 		$emit(sprintf("\n[config_gen.php finished in %.1fs]\n", microtime(true) - $stepStart));
 
+		if (!empty($result['cancelled'])) {
+			return array('success' => false, 'output' => $log, 'error' => 'Build cancelled.');
+		}
 		if (!$result['success']) {
-			$emit("\nconfig_gen.php failed (exit code ".$result['exitcode'].").\n");
+			$emit("\nconfig_gen.php failed (exit code " . $result['exitcode'] . ").\n");
 			return array('success' => false, 'output' => $log, 'error' => 'config_gen.php failed, see log.');
 		}
 
@@ -770,7 +899,7 @@ class CyphtManager
 		$stepStart = microtime(true);
 
 		if (!$this->publishSite()) {
-			$emit($this->error."\n");
+			$emit($this->error . "\n");
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit(sprintf("[copy finished in %.1fs]\n", microtime(true) - $stepStart));
@@ -779,8 +908,56 @@ class CyphtManager
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_LAST_BUILD', dol_now(), 'chaine', 0, '', $conf->entity);
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_BUILT_VERSION', $version, 'chaine', 0, '', $conf->entity);
 
-		$emit("Published to ".$this->getPublicPath()."\nBuild complete - Cypht ".$version." is live.\n");
+		$emit("Published to " . $this->getPublicPath() . "\nBuild complete - Cypht " . $version . " is live.\n");
 
 		return array('success' => true, 'output' => $log, 'error' => '');
 	}
+
+	/**
+     * Force-flush all output buffers to the browser
+     * Handles multiple levels of output buffering and gzip compression
+     */
+    public function cyphtwebmail_flush_now()
+    {
+        // Disable compression if it's causing buffering issues
+        if (ini_get('zlib.output_compression')) {
+            ini_set('zlib.output_compression', 'Off');
+        }
+        
+        // Flush all PHP output buffers
+        while (ob_get_level() > 0) {
+            $status = ob_get_status();
+            if ($status && isset($status['name']) && $status['name'] === 'ob_gzhandler') {
+                // Don't try to flush gzip handler, it breaks
+                break;
+            }
+            ob_end_flush();
+        }
+        
+        // Flush the web server's buffer
+        flush();
+        
+        // If using FastCGI, this helps
+        if (function_exists('fastcgi_finish_request')) {
+            // Only call if we're done with output
+            // fastcgi_finish_request();
+        }
+    }
+
+	// /**
+	//  * Push whatever has been printed so far out to the browser immediately,
+	//  * bypassing both PHP's own output buffer (if any is active) and Apache's.
+	//  * Used before and repeatedly during the build so the connection never goes
+	//  * silent long enough for Apache's own request timeout to drop it, and so
+	//  * the page shows real progress instead of looking frozen.
+	//  *
+	//  * @return void
+	//  */
+	// public function cyphtwebmail_flush_now()
+	// {
+	// 	if (ob_get_level() > 0) {
+	// 		@ob_flush();
+	// 	}
+	// 	@flush();
+	// }
 }
