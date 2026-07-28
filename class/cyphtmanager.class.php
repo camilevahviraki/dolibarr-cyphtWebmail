@@ -332,10 +332,27 @@ class CyphtManager
 		}
 
 		$cmdline = implode(' ', array_map('escapeshellarg', $cmd));
+
+		// stdout/stderr are redirected to real files instead of pipes. On
+		// Windows, stream_set_blocking() does not reliably apply to
+		// proc_open()'s pipe handles - reads on them can still block
+		// indefinitely regardless of the non-blocking flag. That was the
+		// actual cause of config_gen.php appearing to hang forever with
+		// debug.log stopping right after "proc_open succeeded": the very
+		// first stream_get_contents() call on stdout blocked waiting for
+		// data, so the loop below never ran a second iteration - no
+		// heartbeat, no timeout check, no cancel check, nothing. Plain
+		// file reads (filesize()/fread()) are not subject to this
+		// limitation, so we poll the files on disk instead.
+		$stdoutFile = $this->getDataDir() . '/build.stdout.tmp';
+		$stderrFile = $this->getDataDir() . '/build.stderr.tmp';
+		@unlink($stdoutFile);
+		@unlink($stderrFile);
+
 		$descriptorspec = array(
 			0 => array('pipe', 'r'),
-			1 => array('pipe', 'w'),
-			2 => array('pipe', 'w'),
+			1 => array('file', $stdoutFile, 'w'),
+			2 => array('file', $stderrFile, 'w'),
 		);
 
 		$this->debugLog("STARTING: {$cmdline}");
@@ -357,16 +374,27 @@ class CyphtManager
 
 		fclose($pipes[0]);
 
-		// Non-blocking + polling instead of a blocking stream_get_contents()
-		// on stdout followed by stderr: reading one pipe to completion before
-		// touching the other can deadlock if the child fills up the *other*
-		// pipe's OS buffer while we're not draining it yet (small buffers on
-		// Windows make this easy to hit with a script this chatty). Also
-		// note: stream_select() does not work reliably on Windows for
-		// proc_open pipes, which is why this uses a plain poll loop instead.
-		stream_set_blocking($pipes[1], false);
-		stream_set_blocking($pipes[2], false);
+		// Reads whatever new bytes have appeared in a growing file since
+		// the last check, by byte offset - no pipe/stream involved at all.
+		$readNew = function ($file, &$pos) {
+			$size = @filesize($file);
+			if ($size === false || $size <= $pos) {
+				clearstatcache(true, $file);
+				return '';
+			}
+			$fh = @fopen($file, 'rb');
+			if ($fh === false) {
+				return '';
+			}
+			fseek($fh, $pos);
+			$chunk = stream_get_contents($fh);
+			fclose($fh);
+			$pos = $size;
+			return $chunk === false ? '' : $chunk;
+		};
 
+		$stdoutPos = 0;
+		$stderrPos = 0;
 		$stdout = '';
 		$stderr = '';
 		$start = time();
@@ -377,8 +405,10 @@ class CyphtManager
 		$lastHeartbeat = 0;
 
 		while (true) {
-			$newOut = stream_get_contents($pipes[1]);
-			$newErr = stream_get_contents($pipes[2]);
+			clearstatcache(true, $stdoutFile);
+			clearstatcache(true, $stderrFile);
+			$newOut = $readNew($stdoutFile, $stdoutPos);
+			$newErr = $readNew($stderrFile, $stderrPos);
 			$stdout .= $newOut;
 			$stderr .= $newErr;
 
@@ -439,17 +469,19 @@ class CyphtManager
 
 		// Drain whatever was written in the brief window between the last
 		// read above and the process actually exiting/being terminated.
-		$finalOut = stream_get_contents($pipes[1]);
-		$finalErr = stream_get_contents($pipes[2]);
+		clearstatcache(true, $stdoutFile);
+		clearstatcache(true, $stderrFile);
+		$finalOut = $readNew($stdoutFile, $stdoutPos);
+		$finalErr = $readNew($stderrFile, $stderrPos);
 		$stdout .= $finalOut;
 		$stderr .= $finalErr;
 		if ($onChunk !== null && ($finalOut !== '' || $finalErr !== '')) {
 			$onChunk($finalOut . $finalErr);
 		}
 
-		fclose($pipes[1]);
-		fclose($pipes[2]);
 		$exitCode = proc_close($process);
+		@unlink($stdoutFile);
+		@unlink($stderrFile);
 
 		if ($cancelled) {
 			$this->debugLog("FINISHED (cancelled): {$cmdline}");
