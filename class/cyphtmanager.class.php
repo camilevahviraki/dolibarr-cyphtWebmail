@@ -228,28 +228,7 @@ class CyphtManager
 		$dataDir = $this->getDataDir();
 
 		return array(
-			// 'custom' (not the default 'PHP') is required, not optional:
-			// Cypht's own Integration Options docs warn that its PHP
-			// session type calls PHP's native session_start()/session_id()
-			// directly, which collides with Dolibarr's own already-active
-			// PHP session in the same request (performSsoLogin() runs
-			// in-process, see cyphtWebmailindex.php). Custom_Session
-			// (generated into modules/site/lib.php below) stores Cypht's
-			// session data in its own encrypted files instead, completely
-			// independent of PHP's native session mechanism.
 			'SESSION_TYPE'     => 'custom',
-			// 'custom' hands credential checking entirely to our own
-			// Custom_Auth class (generated into modules/site/lib.php by
-			// buildSiteAuthOverride(), see below) instead of Cypht
-			// connecting to a real IMAP/DB backend to log in. This is what
-			// makes SSO from Dolibarr possible: Dolibarr never has the
-			// user's real mailbox password to hand Cypht, so login can't
-			// depend on one. The IMAP_AUTH_* settings below are kept for
-			// reference/rollback but are no longer consulted for login
-			// once AUTH_TYPE=custom - each user adds their real IMAP
-			// mailbox afterwards via Cypht's own Servers/Accounts page
-			// (exactly how Tiki's integration works), independent of how
-			// they were authenticated.
 			'AUTH_TYPE'        => 'custom',
 			'IMAP_AUTH_NAME'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_NAME', 'Webmail'),
 			'IMAP_AUTH_SERVER' => getDolGlobalString('CYPHTWEBMAIL_IMAP_SERVER', 'localhost'),
@@ -262,50 +241,10 @@ class CyphtManager
 			'ENABLE_MEMCACHED' => 'false',
 			'ENABLE_DEBUG'     => 'false',
 			'DEFAULT_LANGUAGE' => 'en',
-			// Cypht's own .env.example ships the full module list, which
-			// includes "themes" - that makes config_gen.php process every
-			// Bootswatch theme variant (the single biggest chunk of the
-			// 173MB vendor/ tree), massively slowing the build for
-			// something this POC doesn't need yet. Trimmed to the minimum
-			// needed to prove IMAP webmail works end to end; add modules
-			// back here deliberately once the core flow is proven.
-			// "site" activates our Custom_Auth override; "api_login"
-			// provides the cypht_login()/cypht_logout() functions used
-			// for SSO. "idle_timer" was removed: Cypht's own docs warn it
-			// does not play nice with API/functional logins.
-			'CYPHT_MODULES'    => 'core,imap,smtp,account,site,api_login,nux,profiles,imap_folders,tags,history',
-			// The API/functional login wiki page's documented requirement:
-			// a session established via cypht_login() was never captured
-			// through the normal login form, so it has no browser
-			// fingerprint on file - without this, Cypht would treat every
-			// SSO'd session as hijacked and force a re-login.
+			'CYPHT_MODULES'    => 'core,contacts,imap,smtp,api_login,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters',
 			'DISABLE_FINGERPRINT' => 'true',
-			// Critical for running Cypht in-process (performSsoLogin()):
-			// Hm_Request's constructor calls empty_super_globals(), which
-			// does "foreach (array_keys($GLOBALS) as $key) { unset(...) }"
-			// - wiping the ENTIRE PHP global scope, not just $_GET/$_POST/
-			// etc. In a standalone Cypht request that's harmless; called
-			// from inside Dolibarr's own request it deletes Dolibarr's
-			// $langs, $user, $conf, $db globals outright, crashing the
-			// very next line that touches any of them (e.g. llxHeader()).
-			// This is one of the four documented integration flags on
-			// Cypht's own Integration Options wiki page - found the hard
-			// way when this specific one was still missing.
 			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
-			// Shared secret used to sign/verify the short-lived SSO token
-			// cyphtWebmailindex.php generates for the current Dolibarr
-			// user (see CyphtManager::generateSsoLoginToken() and
-			// buildSiteAuthOverride()). Never a real mailbox password.
 			'SSO_SHARED_SECRET' => $this->getOrCreateSsoSecret(),
-			// lib/ini_set.php calls ini_set('open_basedir', ...) on every
-			// real page load (not during the build - config_gen.php never
-			// reaches this code path, which is why the build itself always
-			// succeeded while loading the built site crashed). On this
-			// Windows/Apache/mod_php setup that call reliably crashes the
-			// PHP worker outright - no catchable error, no shutdown
-			// function firing, just a dead connection. Cypht ships this
-			// exact escape hatch for that scenario; using it instead of
-			// patching vendored code.
 			'DISABLE_OPEN_BASE_DIR' => 'true',
 		);
 	}
@@ -413,6 +352,27 @@ class Custom_Session extends Hm_Session {
         return $this->session_dir().'/'.preg_replace('/[^a-f0-9]/', '', (string) $key).'.session';
     }
 
+    /**
+     * Temporary diagnostic log, separate from Cypht's own debug system
+     * (which is a black box from Dolibarr's side) - tracks this specific
+     * request's method/URI plus each locking step, so a hung/crashed
+     * request can be pinned to an exact line even though it returns a
+     * raw 503 with no catchable PHP error at all.
+     */
+    private function dbg($line) {
+        $uri = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '?';
+        $method = isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : '?';
+        // Written under the module root itself (not USER_SETTINGS_DIR,
+        // which lives under Dolibarr's separate documents root) so this
+        // is directly readable without needing anyone to relay it.
+        $logPath = dirname(rtrim(APP_PATH, '/\\'), 3) . '/session_debug.log';
+        @file_put_contents(
+            $logPath,
+            sprintf("[%s] pid=%d %s %s key=%s :: %s\n", date('H:i:s.u'), getmypid(), $method, $uri, substr((string) $this->session_key, 0, 8), $line),
+            FILE_APPEND
+        );
+    }
+
     public function check($request, $user = false, $pass = false, $fingerprint = true) {
         if ($user !== false && $pass !== false) {
             if ($this->auth($user, $pass)) {
@@ -421,6 +381,7 @@ class Custom_Session extends Hm_Session {
                 $this->loaded = true;
                 $this->data = [];
                 $this->active = true;
+                $this->dbg('NEW LOGIN established');
                 if ($fingerprint) {
                     $this->set_fingerprint($request);
                 } else {
@@ -428,15 +389,21 @@ class Custom_Session extends Hm_Session {
                 }
                 $this->save_auth_detail();
                 $this->just_started();
+            } else {
+                $this->dbg('auth() returned false for new login attempt');
             }
         } elseif (array_key_exists($this->cname, $request->cookie)) {
             $this->session_key = $request->cookie[$this->cname];
+            $this->dbg('checking existing session cookie');
             $this->get_key($request);
             $this->existing = true;
             $this->start($request, true);
             if ($this->active) {
                 $this->check_fingerprint($request);
+                $this->dbg('active after fingerprint check = '.($this->active ? 'yes' : 'no'));
             }
+        } else {
+            $this->dbg('no cookie, no user/pass - anonymous request');
         }
         return $this->is_active();
     }
@@ -446,16 +413,41 @@ class Custom_Session extends Hm_Session {
             return;
         }
         $file = $this->session_file($this->session_key);
+        $this->dbg('start(): about to check is_readable on '.$file);
         if (!is_readable($file)) {
             $this->active = false;
+            $this->dbg('start(): file not readable, marking inactive');
             return;
         }
-        $data = $this->plaintext(file_get_contents($file));
+        // Locked read: Cypht's own JS fires several AJAX calls back to back
+        // on page load, each a separate PHP request reading/writing this
+        // same file. Without a lock, a read racing an in-progress write
+        // (from another of those parallel requests) can return a partial
+        // write, fail to decrypt, and report the session as inactive -
+        // which is exactly what was causing repeated client-side reloads
+        // (Cypht's JS force-reloads whenever it sees a logged-out response).
+        $fh = @fopen($file, 'rb');
+        if ($fh === false) {
+            $this->active = false;
+            $this->dbg('start(): fopen failed');
+            return;
+        }
+        $this->dbg('start(): fopen ok, requesting LOCK_SH');
+        flock($fh, LOCK_SH);
+        $this->dbg('start(): LOCK_SH acquired, reading');
+        $raw = stream_get_contents($fh);
+        flock($fh, LOCK_UN);
+        fclose($fh);
+        $this->dbg('start(): read '.strlen($raw).' bytes, unlocked');
+
+        $data = $this->plaintext($raw);
         if (is_array($data)) {
             $this->data = $data;
             $this->active = true;
+            $this->dbg('start(): decrypt OK, session active');
         } else {
             $this->active = false;
+            $this->dbg('start(): decrypt FAILED (raw len '.strlen($raw).'), session inactive');
         }
     }
 
@@ -485,7 +477,24 @@ class Custom_Session extends Hm_Session {
 
     public function end() {
         if ($this->active) {
-            @file_put_contents($this->session_file($this->session_key), $this->ciphertext($this->data));
+            $this->dbg('end(): requesting LOCK_EX to persist');
+            // Locked write, same reasoning as start() above - exclusive
+            // lock so a concurrent request's read can't observe a
+            // half-written file.
+            $fh = @fopen($this->session_file($this->session_key), 'cb');
+            if ($fh !== false) {
+                flock($fh, LOCK_EX);
+                $this->dbg('end(): LOCK_EX acquired, writing');
+                ftruncate($fh, 0);
+                rewind($fh);
+                fwrite($fh, $this->ciphertext($this->data));
+                fflush($fh);
+                flock($fh, LOCK_UN);
+                fclose($fh);
+                $this->dbg('end(): write complete, unlocked');
+            } else {
+                $this->dbg('end(): fopen failed');
+            }
             $this->active = false;
         }
     }
@@ -1511,28 +1520,6 @@ PHP;
         
         // Flush the web server's buffer
         flush();
-        
-        // If using FastCGI, this helps
-        if (function_exists('fastcgi_finish_request')) {
-            // Only call if we're done with output
-            // fastcgi_finish_request();
-        }
-    }
 
-	// /**
-	//  * Push whatever has been printed so far out to the browser immediately,
-	//  * bypassing both PHP's own output buffer (if any is active) and Apache's.
-	//  * Used before and repeatedly during the build so the connection never goes
-	//  * silent long enough for Apache's own request timeout to drop it, and so
-	//  * the page shows real progress instead of looking frozen.
-	//  *
-	//  * @return void
-	//  */
-	// public function cyphtwebmail_flush_now()
-	// {
-	// 	if (ob_get_level() > 0) {
-	// 		@ob_flush();
-	// 	}
-	// 	@flush();
-	// }
+    }
 }
