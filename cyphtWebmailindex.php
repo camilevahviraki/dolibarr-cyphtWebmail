@@ -61,7 +61,7 @@ require_once __DIR__.'/class/cyphtmanager.class.php';
 
 global $conf, $db, $langs, $user;
 
-$langs->loadLangs(array("cyphtWebmail@cyphtwebmail"));
+$langs->loadLangs(array("cyphtWebmail@cyphtWebmail"));
 
 // Module-level gate for this POC: any logged in user, as long as the module
 // is enabled. No dedicated permission has been added yet (task for later,
