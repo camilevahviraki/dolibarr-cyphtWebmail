@@ -396,6 +396,109 @@ class Custom_Auth extends Hm_Auth_DB {
         return hash_equals($expected, $signature);
     }
 }
+
+/**
+ * Replaces Hm_User_Config_File as the user-settings backend (activated via
+ * USER_CONFIG_TYPE=custom:Custom_User_Config in .env, a hook Cypht's own
+ * lib/config.php:load_user_config_object() provides for exactly this).
+ *
+ * Root cause this fixes: Hm_User_Config_File encrypts/decrypts the saved
+ * settings file using the "password" argument passed to load()/save() as
+ * the literal encryption key (see Hm_Crypt::ciphertext()/plaintext() in
+ * lib/config.php). Every one of our SSO logins passes a freshly generated,
+ * per-request HMAC token (CyphtSsoBridge::generateSsoLoginToken()) as that
+ * password - a *different* key on every page load - so anything encrypted
+ * with last request's key can never be decrypted with this request's key.
+ * Settings and IMAP/SMTP servers silently vanish and every load() falls
+ * back to defaults. That's the entire "nothing persists after reload" bug.
+ *
+ * Tiki's own Cypht integration (lib/cypht/integration/classes.php,
+ * Tiki_Hm_User_Config) hits this identical problem and solves it the same
+ * way: subclass Hm_Config directly, ignore the $key parameter completely,
+ * and store settings through the host CMS's own persistence instead of
+ * Cypht's password-derived encryption. Tiki uses its own DB preference
+ * table (TikiLib::lib('tiki')->get/set_user_preference()); we don't have
+ * that abstraction, so this stores plain (unencrypted) JSON per user under
+ * USER_SETTINGS_DIR instead - same principle, file-based backend to match
+ * our existing USER_CONFIG_TYPE=file layout. Since Dolibarr's own
+ * authentication already gates who can reach this page at all, there is
+ * no meaningful secret being protected by encrypting these files anyway.
+ *
+ * @package modules
+ * @subpackage site
+ */
+class Custom_User_Config extends Hm_Config {
+
+    /** @var object Hm_Site_Config_File-like site config */
+    private $site_config;
+
+    /** @var string current username, set on load()/reload() */
+    private $username;
+
+    public function __construct($config) {
+        $this->site_config = $config;
+        $this->config = array_merge($this->config, $config->user_defaults);
+    }
+
+    private function get_path($username) {
+        $dir = $this->site_config->get('user_settings_dir', false);
+        $safe = preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $username);
+        return rtrim((string) $dir, '/\\').'/'.$safe.'.json';
+    }
+
+    /**
+     * @param string $username username
+     * @param string $key intentionally ignored - see class doc comment
+     */
+    public function load($username, $key = null) {
+        $this->username = $username;
+        $source = $this->get_path($username);
+        if (is_readable($source)) {
+            $str_data = file_get_contents($source);
+            if ($str_data) {
+                $data = $this->decode($str_data);
+                if (is_array($data)) {
+                    $this->config = array_merge($this->config, $data);
+                    $this->set_tz();
+                }
+            }
+        }
+    }
+
+    public function reload($data, $username = false) {
+        $this->username = $username;
+        $this->config = $data;
+        $this->set_tz();
+    }
+
+    /**
+     * @param string $username username
+     * @param string $key intentionally ignored - see class doc comment
+     */
+    public function save($username, $key = null) {
+        $this->shuffle();
+        $removed = $this->filter_servers();
+
+        $dir = $this->site_config->get('user_settings_dir', false);
+        if ($dir && !is_dir($dir)) {
+            @mkdir($dir, 0700, true);
+        }
+
+        $fh = @fopen($this->get_path($username), 'cb');
+        if ($fh !== false) {
+            flock($fh, LOCK_EX);
+            ftruncate($fh, 0);
+            rewind($fh);
+            fwrite($fh, json_encode($this->config));
+            fflush($fh);
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            @chmod($this->get_path($username), 0600);
+        }
+
+        $this->restore_servers($removed);
+    }
+}
 PHP;
 	}
 
@@ -428,13 +531,44 @@ PHP;
 	 * an HTTP POST, setting the hm_id/hm_session cookies on the current
 	 * response. Must be called before any HTML output.
 	 *
+	 * Skips the actual login call entirely if this browser already holds a
+	 * live Cypht session for this exact user (see hasLiveSsoSession()).
+	 * This matters because cyphtWebmailindex.php (the outer Dolibarr page
+	 * that embeds Cypht in an iframe) calls this on *every* page load -
+	 * every browser refresh or re-click of the CyphtWebmail menu item, not
+	 * just the first visit. cypht_login() always takes Custom_Session's
+	 * "new login" branch, which unconditionally does $this->data = [] -
+	 * wiping the session. Cypht itself only mirrors settings changes made
+	 * during a session into that same session data (see
+	 * Hm_Handler_save_user_data in modules/core/handler_modules.php,
+	 * explicitly commented "session only" in Cypht's own source) and only
+	 * ever writes them to permanent storage via a couple of narrow
+	 * triggers (re-entering your password via "Save and Logout", or an
+	 * IMAP folder change flagging save_on_login) - so unconditionally
+	 * logging in fresh on every outer-page reload was silently discarding
+	 * everything that hadn't hit one of those triggers, which in practice
+	 * was almost everything: general settings, IMAP/SMTP servers added
+	 * but not yet flagged for save-on-login, etc. That's the actual
+	 * mechanism behind "nothing persists after reload" - a distinct,
+	 * additional cause from the user-config encryption-key mismatch fixed
+	 * by Custom_User_Config above. Requests made *inside* the iframe
+	 * (talking to public/index.php directly, e.g. every settings save or
+	 * folder click) never hit this - they reuse the existing session
+	 * cookie fine, which is why a change could look "saved" right up
+	 * until the next full reload of the outer page.
+	 *
 	 * @param string $login Dolibarr username to log into Cypht as
 	 * @param string $cyphtUrl URL of the published Cypht app - does not
 	 *                          need to be absolute already, see below
-	 * @return bool true if Cypht accepted the SSO token
+	 * @return bool true if Cypht accepted the SSO token, or a live session
+	 *              already existed and was left alone
 	 */
 	public function performSsoLogin($login, $cyphtUrl)
 	{
+		if ($this->hasLiveSsoSession($login)) {
+			return true;
+		}
+
 		$apiFile = $this->paths->getCyphtPath() . '/modules/api_login/api.php';
 		if (!is_readable($apiFile)) {
 			$this->error = 'modules/api_login/api.php not found - was the "api_login" module built into CYPHT_MODULES?';
@@ -445,7 +579,85 @@ PHP;
 
 		$token = $this->generateSsoLoginToken($login);
 
-		return cypht_login($login, $token, $this->absolutizeUrl($cyphtUrl));
+		$ok = cypht_login($login, $token, $this->absolutizeUrl($cyphtUrl));
+		if ($ok) {
+			$this->rememberSsoSession($login);
+		}
+
+		return $ok;
+	}
+
+	/**
+	 * Name of the cookie we set ourselves (separate from Cypht's own
+	 * hm_session/hm_id) recording which Dolibarr login the current Cypht
+	 * session belongs to, so a later request can tell "already logged in
+	 * as this user" apart from "already logged in as someone else" or
+	 * "never logged in" without decrypting anything.
+	 *
+	 * @return string
+	 */
+	private function ssoUserCookieName()
+	{
+		return 'cyphtwebmail_ssouser';
+	}
+
+	/**
+	 * True if this browser already presents a plausible, still-on-disk
+	 * Cypht session for $login - i.e. calling cypht_login() again would
+	 * only destroy perfectly good session state for no benefit. Checks
+	 * three things, all required: our own cookie recording which login
+	 * the session belongs to (matches $login), Cypht's own hm_session
+	 * cookie (the session key), and that the session file it names still
+	 * actually exists on disk (an expired/cleaned-up/never-written
+	 * session must fall through to a real login instead of leaving the
+	 * user stuck against a dead session).
+	 *
+	 * @param string $login
+	 * @return bool
+	 */
+	private function hasLiveSsoSession($login)
+	{
+		if (empty($_COOKIE['hm_session']) || empty($_COOKIE['hm_id']) || empty($_COOKIE[$this->ssoUserCookieName()])) {
+			return false;
+		}
+
+		if (!hash_equals((string) $login, (string) $_COOKIE[$this->ssoUserCookieName()])) {
+			return false;
+		}
+
+		$sessionKey = preg_replace('/[^a-f0-9]/', '', (string) $_COOKIE['hm_session']);
+		if ($sessionKey === '') {
+			return false;
+		}
+
+		// Mirrors Custom_Session::session_file()'s own naming convention in
+		// the generated modules/site/lib.php (see
+		// buildSiteAuthOverrideContent() above) - dataDir/sso_sessions/<key>.session.
+		$sessionFile = $this->paths->getDataDir() . '/sso_sessions/' . $sessionKey . '.session';
+
+		return is_readable($sessionFile);
+	}
+
+	/**
+	 * Record which Dolibarr login the session cypht_login() just
+	 * established belongs to, so the next request's hasLiveSsoSession()
+	 * check can recognize it. Session-lifetime cookie (no explicit
+	 * expiry) - deliberately no longer-lived than that, since it is only
+	 * ever meant to skip a redundant re-login within the same browser
+	 * session, not to authenticate anything itself.
+	 *
+	 * @param string $login
+	 * @return void
+	 */
+	private function rememberSsoSession($login)
+	{
+		$secure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+		setcookie($this->ssoUserCookieName(), $login, array(
+			'path' => '/',
+			'secure' => $secure,
+			'httponly' => true,
+			'samesite' => 'Lax',
+		));
 	}
 
 	/**

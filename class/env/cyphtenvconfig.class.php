@@ -72,7 +72,19 @@ class CyphtEnvConfig
 			'IMAP_AUTH_SERVER' => getDolGlobalString('CYPHTWEBMAIL_IMAP_SERVER', 'localhost'),
 			'IMAP_AUTH_PORT'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_PORT', '993'),
 			'IMAP_AUTH_TLS'    => getDolGlobalString('CYPHTWEBMAIL_IMAP_TLS', 'true'),
-			'USER_CONFIG_TYPE' => 'file',
+			// 'custom:Custom_User_Config' (not 'file'): Hm_User_Config_File
+			// encrypts the settings file using the "password" passed to
+			// load()/save() as the literal key, and our SSO "password" is a
+			// fresh per-request HMAC token - a different key every login -
+			// so nothing saved under it could ever be decrypted again. This
+			// is the exact "nothing persists after reload" bug the user
+			// hit. Custom_User_Config (in the generated modules/site/lib.php,
+			// see CyphtSsoBridge::buildSiteAuthOverrideContent()) mirrors
+			// Tiki's own fix for the same problem (Tiki_Hm_User_Config in
+			// their lib/cypht/integration/classes.php): ignore the key
+			// entirely and store settings unencrypted, since Dolibarr's own
+			// auth already gates access to this page.
+			'USER_CONFIG_TYPE' => 'custom:Custom_User_Config',
 			'USER_SETTINGS_DIR' => $dataDir . '/users',
 			'ATTACHMENT_DIR'   => $dataDir . '/attachments',
 			'ENABLE_REDIS'     => 'false',
