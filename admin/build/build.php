@@ -76,8 +76,16 @@ if (session_id()) {
     session_write_close();
 }
 
-$buildResult = $manager->runConfigGen(function ($chunk) use ($manager) {
-    echo $chunk;
+// One JSON object per line (NDJSON), not raw text: lets the client tell
+// real stdout, real stderr, and our own synthetic status lines apart and
+// color them differently, without needing a second channel (SSE/WebSocket)
+// alongside this already-working chunked response. $chunk itself may
+// contain literal newlines (e.g. multi-line composer output) - that's
+// fine, json_encode() escapes them inside the JSON string, so each
+// "line" of this response is still exactly one JSON object no matter
+// what the underlying tool printed.
+$buildResult = $manager->runConfigGen(function ($chunk, $type) use ($manager) {
+    echo json_encode(array('t' => $type, 'c' => $chunk))."\n";
     $manager->cyphtwebmail_flush_now();
 });
 
@@ -90,6 +98,18 @@ $buildResult = $manager->runConfigGen(function ($chunk) use ($manager) {
 // load starts its own session normally.
 
 if (!$buildResult['success']) {
+    // http_response_code() is a no-op here (headers went out with the
+    // first streamed chunk above already) - kept anyway as an honest
+    // reflection of the outcome for anything inspecting the response
+    // object, even though the browser won't act on it at this point.
     http_response_code(500);
-    echo "\n\n".$langs->trans("CyphtWebmailBuildFailed").": ".$buildResult['error'];
+    // Same NDJSON envelope as every chunk above, not raw text - a plain
+    // echo here would be a non-JSON line breaking the client's parser
+    // right at the most important message (this build's final failure
+    // reason), and 'err' colors it red like the failures already
+    // streamed above it.
+    echo json_encode(array(
+        't' => 'err',
+        'c' => "\n\n".$langs->trans("CyphtWebmailBuildFailed").": ".$buildResult['error'],
+    ))."\n";
 }
