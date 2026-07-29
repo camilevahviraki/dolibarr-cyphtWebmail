@@ -247,6 +247,19 @@ class CyphtManager
 	}
 
 	/**
+	 * Raw NDJSON of the most recent completed (or in-progress/interrupted)
+	 * build attempt, same format streamed live during runConfigGen() -
+	 * lets the setup page show it again after a fresh page load instead
+	 * of only while the original request is still open.
+	 *
+	 * @return string
+	 */
+	public function getLastBuildLog()
+	{
+		return $this->buildPipeline->getLastBuildLog();
+	}
+
+	/**
 	 * Force-flush all output buffers to the browser. Handles multiple
 	 * levels of output buffering and gzip compression. Stays directly on
 	 * the facade since it's generic streaming plumbing, not tied to any
