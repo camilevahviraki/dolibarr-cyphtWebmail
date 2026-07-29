@@ -303,26 +303,55 @@ class Custom_Session extends Hm_Session {
     }
 
     public function end() {
-        if ($this->active) {
-            $this->dbg('end(): requesting LOCK_EX to persist');
-            // Locked write, same reasoning as start() above - exclusive
-            // lock so a concurrent request's read can't observe a
-            // half-written file.
-            $fh = @fopen($this->session_file($this->session_key), 'cb');
-            if ($fh !== false) {
-                flock($fh, LOCK_EX);
-                $this->dbg('end(): LOCK_EX acquired, writing');
-                ftruncate($fh, 0);
-                rewind($fh);
-                fwrite($fh, $this->ciphertext($this->data));
-                fflush($fh);
-                flock($fh, LOCK_UN);
-                fclose($fh);
-                $this->dbg('end(): write complete, unlocked');
-            } else {
-                $this->dbg('end(): fopen failed');
-            }
-            $this->active = false;
+        if ($this->active && !$this->session_closed) {
+            $this->dbg('end(): persisting via write_locked()');
+            $this->write_locked();
+        }
+        $this->active = false;
+    }
+
+    /**
+     * Write session data to avoid locking, keep session active, but
+     * don't allow further writes - called by several core/module
+     * handlers (nux's "Add an E-mail Account" flow among them, plus
+     * imap_folders, sievefilters, 2fa, github, wordpress) before a slow
+     * operation (e.g. testing IMAP/SMTP credentials) so this session's
+     * file lock isn't held for the duration. Every stock Cypht session
+     * backend (Hm_PHP_Session, Hm_DB_Session, Hm_Memcached_Session)
+     * implements this; Hm_Session itself (which Custom_Session extends)
+     * declares $session_closed but provides no default close_early() -
+     * leaving it unimplemented here meant a hard "Call to undefined
+     * method Custom_Session::close_early()" fatal (an uncaught Error ->
+     * 503, no catchable PHP error and no JSON the client could parse)
+     * the instant any of those modules ran. That's exactly why "Add an
+     * E-mail Account" worked in a standalone Cypht install (using a
+     * stock session backend) but failed here.
+     */
+    public function close_early() {
+        if ($this->active && !$this->session_closed) {
+            $this->dbg('close_early(): persisting via write_locked()');
+            $this->write_locked();
+        }
+        $this->session_closed = true;
+    }
+
+    private function write_locked() {
+        // Locked write, same reasoning as start() above - exclusive
+        // lock so a concurrent request's read can't observe a
+        // half-written file.
+        $fh = @fopen($this->session_file($this->session_key), 'cb');
+        if ($fh !== false) {
+            flock($fh, LOCK_EX);
+            $this->dbg('write_locked(): LOCK_EX acquired, writing');
+            ftruncate($fh, 0);
+            rewind($fh);
+            fwrite($fh, $this->ciphertext($this->data));
+            fflush($fh);
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            $this->dbg('write_locked(): write complete, unlocked');
+        } else {
+            $this->dbg('write_locked(): fopen failed');
         }
     }
 

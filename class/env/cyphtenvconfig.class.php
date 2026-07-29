@@ -85,7 +85,15 @@ class CyphtEnvConfig
 			// after SSO logs them in (same decoupled pattern Tiki uses).
 			// "api_login" must also stay in: it's what performSsoLogin()
 			// (CyphtSsoBridge) actually calls.
-			'CYPHT_MODULES'    => 'core,contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters',
+			// "themes" must also stay in (added for Cypht dev-master):
+			// it's the first-party module that now ships the Bootswatch
+			// theme CSS packs and injects the <link> tag for the active
+			// one on every page (replaces the old external
+			// thomaspark/bootswatch package our vendor bridge targeted).
+			// Without it, requests for modules/themes/assets/*/css/*.css
+			// have no handler and crash instead of loading, which is why
+			// the whole app rendered unstyled.
+			'CYPHT_MODULES'    => 'core,contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters,themes',
 			'DISABLE_FINGERPRINT' => 'true',
 			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
 			'SSO_SHARED_SECRET' => $this->sso->getOrCreateSsoSecret(),
