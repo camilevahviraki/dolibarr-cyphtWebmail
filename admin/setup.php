@@ -174,7 +174,48 @@ print '<button type="submit" class="button" data-loading-text="'.$langs->trans("
 print '</form>';
 print '</div>';
 
+// 'out' is real child-process output (stdout and stderr alike - see the
+// long comment in CyphtBuildPipeline::runProcess() for why stderr isn't
+// colored red just for being stderr: Composer writes almost all of its
+// normal, successful output there), 'err' is reserved for our own
+// synthetic failure messages (gated on the real exit code), 'info' is
+// our own synthetic step/status lines (blue+bold) - so a glance at color
+// alone tells you step boundaries and genuine failures apart from the
+// large majority of lines that are just routine tool output.
+print '<style>
+#cyphtwebmail-log .log-out { color: #d4d4d4; }
+#cyphtwebmail-log .log-err { color: #f14c4c; }
+#cyphtwebmail-log .log-info { color: #4fc1ff; font-weight: bold; }
+</style>';
+$lastBuildLog = $manager->getLastBuildLog();
+
+// The toggle button itself is hidden on page load when there's nothing
+// to toggle yet (no build has ever run) - showing a "Show build log"
+// button that opens onto an empty box is just a dead end. setup.js
+// un-hides this button the moment a build actually starts (same place
+// it un-hides cyphtwebmail-log-wrap below), so it's never missing once
+// there's real content to view.
+print '<div class="center" style="margin-top: 10px;">';
+print '<button type="button" id="cyphtwebmail-log-toggle" class="button" data-show-text="'.$langs->trans("CyphtWebmailShowLog").'" data-hide-text="'.$langs->trans("CyphtWebmailHideLog").'" style="'.($lastBuildLog === '' ? 'display:none;' : '').'">'.$langs->trans("CyphtWebmailShowLog").'</button>';
+print '</div>';
+// Hidden by default (id="cyphtwebmail-log-wrap") - an always-visible empty
+// black box is just dead weight on a page most people load without
+// clicking Generate. The toggle button above shows/hides it, and
+// setup.js also un-hides it automatically the moment a build starts, so
+// nobody has to remember to click "Show" first to watch it.
+print '<div id="cyphtwebmail-log-wrap" style="display:none;">';
 print '<pre id="cyphtwebmail-log" style="background:#1e1e1e; color:#d4d4d4; font-family:Consolas,\'Courier New\',monospace; font-size:12px; line-height:1.5; padding:12px 14px; max-height:500px; overflow:auto; border-radius:6px; border:1px solid #333; white-space:pre-wrap; word-break:break-all; margin-top:10px;"></pre>';
+print '</div>';
+
+// Embedded as JSON, not printed as raw HTML - it's arbitrary NDJSON text
+// (composer/config_gen.php output), not something to trust or interpret
+// as markup. json_encode() escapes "/" to "\/" by default (no flags
+// passed here), which is what keeps a literal "</script>" inside the log
+// text from prematurely closing this tag. setup.js reads this on
+// DOMContentLoaded and renders it into the (still-hidden) log box so
+// it's ready the moment "Show build log" is clicked, without needing a
+// build to have just run in this same page load.
+print '<script type="application/json" id="cyphtwebmail-last-log">'.json_encode($lastBuildLog).'</script>';
 
 print '<script src="'.dol_buildpath('/cyphtWebmail/js/admin/setup.js', 1).'"></script>';
 
