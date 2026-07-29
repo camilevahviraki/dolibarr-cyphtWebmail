@@ -1,1 +1,4 @@
 /vendor/
+/debug.log
+/last_build_log.ndjson
+/public
