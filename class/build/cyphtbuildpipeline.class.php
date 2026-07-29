@@ -124,19 +124,127 @@ class CyphtBuildPipeline
 	}
 
 	/**
+	 * Recognizes the two realistic ways a child process (composer,
+	 * config_gen.php) can end up stuck on something this web terminal
+	 * deliberately does not and should not provide: a sudo password
+	 * prompt, or a plain permission/ownership error. stdin is already
+	 * closed immediately after proc_open() (see the comment there),
+	 * which makes most *ordinary* prompts fail fast with their own error
+	 * instead of hanging - but `sudo` in particular is known to read the
+	 * password straight from the controlling terminal rather than stdin
+	 * on some configurations, which stdin being closed does nothing to
+	 * stop, and would otherwise hang until runProcess()'s own 180s
+	 * timeout finally kills it with a generic, unhelpful "[Timed out]".
+	 *
+	 * Two other patterns (SSH key passphrase, git HTTPS credential
+	 * prompts) were removed after review: both would only ever come from
+	 * `composer install`, which already runs with --no-interaction and
+	 * so fails fast with its own error instead of actually printing
+	 * either prompt - the patterns would never have matched anything
+	 * real. Permission/access-denied earns its place for a different
+	 * reason than sudo does: it's not a hang risk (it already fails
+	 * fast on its own), it's just the single most common real-world
+	 * Composer failure across shared hosting and VPS Linux deployments
+	 * (web server user vs. file owner mismatches), so it's worth a
+	 * clear reported reason instead of a bare "exit code 1".
+	 *
+	 * Deliberately does not try to answer or elevate either case itself
+	 * - this module runs as whatever user the webserver runs as, and the
+	 * fix for both is a one-time setup step outside the browser (fix
+	 * ownership/permissions, or grant the webserver user what it needs),
+	 * not a prompt this UI should be answering.
+	 *
+	 * @param string $text Newly-read stdout/stderr content to check.
+	 * @return string|null Human-readable reason if a prompt/permission
+	 *                      issue was recognized, null if $text looks like
+	 *                      ordinary output.
+	 */
+	private function detectPrivilegeOrCredentialPrompt($text)
+	{
+		if ($text === '') {
+			return null;
+		}
+
+		$checks = array(
+			// sudo specifically prompting for a password - the one real
+			// hang risk in this list, see the doc comment above.
+			'/\[sudo\]\s*password/i' => 'This command is asking for a sudo password. ' .
+				'This web terminal will not accept or cache one - run this command yourself ' .
+				'from a system terminal as a privileged user instead.',
+			// Plain permission/ownership errors - nothing to prompt for
+			// or hang on, just the most common real-world failure worth
+			// naming clearly instead of a bare exit-code message.
+			'/permission denied/i' => 'Permission denied - the webserver user does not have the access ' .
+				'this command needs. Fix the file/folder ownership or permissions, or run the ' .
+				'command manually as a user that has them; this module will not attempt to ' .
+				'elevate privileges itself.',
+			'/access is denied/i' => 'Access denied - the webserver user does not have the access this ' .
+				'command needs. Fix the file/folder permissions, or run the command manually as a ' .
+				'user that has them; this module will not attempt to elevate privileges itself.',
+		);
+
+		foreach ($checks as $pattern => $reason) {
+			if (preg_match($pattern, $text)) {
+				return $reason;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Same NDJSON format streamed live to the browser (one {t,c} JSON
+	 * object per line - see runProcess()'s doc comment for what the
+	 * types mean), just also written to disk as it happens so the setup
+	 * page can show the last build's colored log again on a fresh page
+	 * load, not just while the original streaming request is still open.
+	 *
+	 * @return string
+	 */
+	private function getLastBuildLogPath()
+	{
+		return $this->paths->getModuleRoot() . '/last_build_log.ndjson';
+	}
+
+	/**
+	 * @return string Raw NDJSON content of the most recent build attempt
+	 *                that actually got past the "already running" guard,
+	 *                or '' if none has ever run.
+	 */
+	public function getLastBuildLog()
+	{
+		$content = @file_get_contents($this->getLastBuildLogPath());
+		return $content === false ? '' : $content;
+	}
+
+	/**
 	 * Run a command as a subprocess without depending on symfony/process
 	 * (not guaranteed to be available to a custom module's autoloader).
 	 *
 	 * @param string[]      $cmd     Command + arguments, each will be escaped
 	 * @param string        $cwd     Working directory to run the command in
-	 * @param callable|null $onChunk Optional callback(string $chunk), invoked
-	 *                               with new stdout/stderr content as soon as
-	 *                               it's read - lets the caller stream output
-	 *                               to the browser live instead of waiting
-	 *                               for the whole process to finish. Also
-	 *                               what keeps the HTTP connection from going
-	 *                               silent long enough for Apache's own
-	 *                               request timeout to drop it.
+	 * @param callable|null $onChunk Optional callback(string $chunk, string $type),
+	 *                               invoked with new stdout/stderr content as
+	 *                               soon as it's read - lets the caller stream
+	 *                               output to the browser live instead of
+	 *                               waiting for the whole process to finish.
+	 *                               Also what keeps the HTTP connection from
+	 *                               going silent long enough for Apache's own
+	 *                               request timeout to drop it. $type is
+	 *                               always 'out' here, for both stdout and
+	 *                               stderr content - deliberately NOT tagged
+	 *                               'err' just because it came from the
+	 *                               stderr stream. Composer in particular
+	 *                               writes almost all of its normal,
+	 *                               successful progress output to stderr by
+	 *                               convention (confirmed live: a clean
+	 *                               "composer install" with exit code 0
+	 *                               produced 0 stdout bytes and 338 stderr
+	 *                               bytes) - coloring by raw stream would
+	 *                               paint a fully successful run red. 'err'
+	 *                               is reserved for the caller's own
+	 *                               synthetic failure messages below, which
+	 *                               are gated on the real exit code instead.
 	 * @return array{success:bool,output:string,error:string,exitcode:int}
 	 */
 	private function runProcess(array $cmd, $cwd, callable $onChunk = null)
@@ -222,6 +330,7 @@ class CyphtBuildPipeline
 		$timeoutSeconds = 180;
 		$timedOut = false;
 		$cancelled = false;
+		$privilegePromptReason = null;
 		$cancelFlag = $this->getCancelFlagPath();
 		$lastHeartbeat = 0;
 
@@ -237,8 +346,13 @@ class CyphtBuildPipeline
 				$this->debugLog("  output received (" . strlen($newOut) . " stdout / " . strlen($newErr) . " stderr bytes)");
 			}
 
-			if ($onChunk !== null && ($newOut !== '' || $newErr !== '')) {
-				$onChunk($newOut . $newErr);
+			if ($onChunk !== null) {
+				if ($newOut !== '') {
+					$onChunk($newOut, 'out');
+				}
+				if ($newErr !== '') {
+					$onChunk($newErr, 'out');
+				}
 			}
 
 			$status = proc_get_status($process);
@@ -248,6 +362,25 @@ class CyphtBuildPipeline
 			}
 
 			$elapsed = time() - $start;
+
+			// Checked on every poll tick (not just once) since a prompt
+			// can appear well after the process starts, e.g. partway
+			// through resolving a VCS dependency. Caught here, rather
+			// than left to run into the 180s timeout below, so the user
+			// gets a specific reason instead of a generic "[Timed out]"
+			// - see detectPrivilegeOrCredentialPrompt()'s own comment for
+			// why this module never tries to actually answer the prompt.
+			$promptReason = $this->detectPrivilegeOrCredentialPrompt($newOut . $newErr);
+			if ($promptReason !== null) {
+				$privilegePromptReason = $promptReason;
+				$this->debugLog("  privilege/credential prompt detected after {$elapsed}s - killing pid {$status['pid']}: {$promptReason}");
+				if (stripos(PHP_OS, 'WIN') === 0 && function_exists('exec')) {
+					@exec('taskkill /F /T /PID ' . ((int) $status['pid']) . ' 2>NUL');
+				}
+				proc_terminate($process, 9);
+				break;
+			}
+
 			if ($elapsed >= $lastHeartbeat + 5) {
 				$lastHeartbeat = $elapsed;
 				$this->debugLog("  still running after {$elapsed}s (pid={$status['pid']}), total output so far: " . strlen($stdout) . " stdout / " . strlen($stderr) . " stderr bytes");
@@ -296,8 +429,13 @@ class CyphtBuildPipeline
 		$finalErr = $readNew($stderrFile, $stderrPos);
 		$stdout .= $finalOut;
 		$stderr .= $finalErr;
-		if ($onChunk !== null && ($finalOut !== '' || $finalErr !== '')) {
-			$onChunk($finalOut . $finalErr);
+		if ($onChunk !== null) {
+			if ($finalOut !== '') {
+				$onChunk($finalOut, 'out');
+			}
+			if ($finalErr !== '') {
+				$onChunk($finalErr, 'out');
+			}
 		}
 
 		$exitCode = proc_close($process);
@@ -312,6 +450,17 @@ class CyphtBuildPipeline
 				'error' => trim($stderr) . "\n[Cancelled by user]",
 				'exitcode' => -1,
 				'cancelled' => true,
+			);
+		}
+
+		if ($privilegePromptReason !== null) {
+			$this->debugLog("FINISHED (privilege/credential prompt): {$cmdline}");
+			return array(
+				'success' => false,
+				'output' => $stdout,
+				'error' => $privilegePromptReason,
+				'exitcode' => -1,
+				'privilege_prompt' => true,
 			);
 		}
 
@@ -535,6 +684,13 @@ class CyphtBuildPipeline
 		// within the first poll tick.
 		@unlink($this->getCancelFlagPath());
 
+		// Reset only here, once we've actually committed to running a
+		// real build - not unconditionally at the top of this method like
+		// debug.log is, since that would wipe the last real build's
+		// persisted log every time someone clicks Generate while one is
+		// already running and just gets rejected below.
+		@file_put_contents($this->getLastBuildLogPath(), '');
+
 		file_put_contents($lockFile, (string) time());
 		try {
 			return $this->runConfigGenSteps($onProgress);
@@ -565,7 +721,20 @@ class CyphtBuildPipeline
 	 * individually, so a slow or stuck run can be pinned to a specific
 	 * step instead of just "the button took a while".
 	 *
-	 * @param callable|null $onProgress callback(string $chunk)
+	 * @param callable|null $onProgress callback(string $chunk, string $type).
+	 *                                  $type is 'out' for real child process
+	 *                                  output (stdout and stderr alike,
+	 *                                  passed straight through from
+	 *                                  runProcess() - see its own doc
+	 *                                  comment for why stderr isn't tagged
+	 *                                  'err' just for being stderr), 'info'
+	 *                                  for this method's own synthetic
+	 *                                  step/progress headers, or 'err' for
+	 *                                  this method's own synthetic failure
+	 *                                  messages - those are the only ones
+	 *                                  gated on a real exit code, so they're
+	 *                                  the only ones that should read as an
+	 *                                  actual error to the caller.
 	 * @return array{success:bool,output:string,error:string}
 	 */
 	private function runConfigGenSteps(callable $onProgress = null)
@@ -573,10 +742,17 @@ class CyphtBuildPipeline
 		global $conf;
 
 		$log = '';
-		$emit = function ($chunk) use (&$log, $onProgress) {
+		$emit = function ($chunk, $type = 'info') use (&$log, $onProgress) {
 			$log .= $chunk;
+			// $this is available here without a "use" clause - closures
+			// created inside a method automatically inherit it in PHP.
+			// Appended (not rewritten) each call so a build that gets
+			// killed by the timeout/cancel/crash paths below still
+			// leaves a complete, readable log up to the point it stopped,
+			// same reasoning as debugLog()'s own incremental writes.
+			@file_put_contents($this->getLastBuildLogPath(), json_encode(array('t' => $type, 'c' => $chunk))."\n", FILE_APPEND);
 			if ($onProgress !== null) {
-				$onProgress($chunk);
+				$onProgress($chunk, $type);
 			}
 		};
 
@@ -599,14 +775,18 @@ class CyphtBuildPipeline
 			if (!empty($installResult['cancelled'])) {
 				return array('success' => false, 'output' => $log, 'error' => 'Build cancelled.');
 			}
+			if (!empty($installResult['privilege_prompt'])) {
+				$emit("\n" . $installResult['error'] . "\n", 'err');
+				return array('success' => false, 'output' => $log, 'error' => $installResult['error']);
+			}
 			if (!$installResult['success']) {
-				$emit("\ncomposer install failed (exit code " . $installResult['exitcode'] . ").\n");
+				$emit("\ncomposer install failed (exit code " . $installResult['exitcode'] . ").\n", 'err');
 				return array('success' => false, 'output' => $log, 'error' => 'composer install failed, see log.');
 			}
 		} elseif (is_dir($cyphtPath)) {
 			$emit("Composer executable not found on this server - skipping, using the vendor/ already on disk as-is.\n");
 		} else {
-			$emit("Composer executable not found on this server, and Cypht is not present under vendor/.\n");
+			$emit("Composer executable not found on this server, and Cypht is not present under vendor/.\n", 'err');
 			return array(
 				'success' => false,
 				'output' => $log,
@@ -616,7 +796,7 @@ class CyphtBuildPipeline
 		}
 
 		if (!is_dir($cyphtPath)) {
-			$emit("\nvendor/jason-munro/cypht still missing after composer install.\n");
+			$emit("\nvendor/jason-munro/cypht still missing after composer install.\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => 'Cypht did not get installed, see log.');
 		}
 
@@ -625,27 +805,27 @@ class CyphtBuildPipeline
 
 		if (!$this->envConfig->writeEnvFile($this->envConfig->buildEnvOverrides())) {
 			$this->error = $this->envConfig->error;
-			$emit($this->error . "\n");
+			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 
 		if (!$this->vendorBridge->ensureCyphtVendorBridge()) {
 			$this->error = $this->vendorBridge->error;
-			$emit($this->error . "\n");
+			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit("vendor/ bridge shim in place (Cypht installed as a flat dependency, see comment in the file).\n");
 
 		if (!$this->sso->writeSiteAuthOverride()) {
 			$this->error = $this->sso->error;
-			$emit($this->error . "\n");
+			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit("Dolibarr SSO auth override written to modules/site/lib.php.\n");
 
 		if (!$this->upstreamPatcher->patchCoreFunctionsGuard()) {
 			$this->error = $this->upstreamPatcher->error;
-			$emit($this->error . "\n");
+			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit("Patched missing hm_exists() guards in modules/core/functions.php (upstream gap, needed for SSO).\n");
@@ -654,7 +834,7 @@ class CyphtBuildPipeline
 		if ($phpBinary === null) {
 			$emit("No usable PHP CLI executable found. PHP is running as an Apache module here, so PHP_BINARY " .
 				"points at httpd.exe, not php.exe - and no 'php' was found on PATH or at the usual XAMPP location " .
-				"(<xampp>/php/php.exe). Add php.exe to your system PATH, or drop a composer.phar in the module root.\n");
+				"(<xampp>/php/php.exe). Add php.exe to your system PATH, or drop a composer.phar in the module root.\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => 'No PHP CLI binary found, see log.');
 		}
 		$emit("Using PHP CLI: " . $phpBinary . "\n");
@@ -666,8 +846,12 @@ class CyphtBuildPipeline
 		if (!empty($result['cancelled'])) {
 			return array('success' => false, 'output' => $log, 'error' => 'Build cancelled.');
 		}
+		if (!empty($result['privilege_prompt'])) {
+			$emit("\n" . $result['error'] . "\n", 'err');
+			return array('success' => false, 'output' => $log, 'error' => $result['error']);
+		}
 		if (!$result['success']) {
-			$emit("\nconfig_gen.php failed (exit code " . $result['exitcode'] . ").\n");
+			$emit("\nconfig_gen.php failed (exit code " . $result['exitcode'] . ").\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => 'config_gen.php failed, see log.');
 		}
 
@@ -676,7 +860,7 @@ class CyphtBuildPipeline
 		$stepStart = microtime(true);
 
 		if (!$this->publishSite()) {
-			$emit($this->error . "\n");
+			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit(sprintf("[copy finished in %.1fs]\n", microtime(true) - $stepStart));
