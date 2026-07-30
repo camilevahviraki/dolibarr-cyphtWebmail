@@ -22,9 +22,6 @@ require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
  * \file        class/env/cyphtenvconfig.class.php
  * \ingroup     cyphtWebmail
  * \brief       Builds and writes Cypht's .env file from Dolibarr constants.
- *              Extracted out of CyphtManager, which had grown too large -
- *              see class/cyphtmanager.class.php for the facade that wires
- *              this together with its siblings.
  */
 class CyphtEnvConfig
 {
@@ -72,18 +69,11 @@ class CyphtEnvConfig
 			'IMAP_AUTH_SERVER' => getDolGlobalString('CYPHTWEBMAIL_IMAP_SERVER', 'localhost'),
 			'IMAP_AUTH_PORT'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_PORT', '993'),
 			'IMAP_AUTH_TLS'    => getDolGlobalString('CYPHTWEBMAIL_IMAP_TLS', 'true'),
-			// 'custom:Custom_User_Config' (not 'file'): Hm_User_Config_File
-			// encrypts the settings file using the "password" passed to
-			// load()/save() as the literal key, and our SSO "password" is a
-			// fresh per-request HMAC token - a different key every login -
-			// so nothing saved under it could ever be decrypted again. This
-			// is the exact "nothing persists after reload" bug the user
-			// hit. Custom_User_Config (in the generated modules/site/lib.php,
-			// see CyphtSsoBridge::buildSiteAuthOverrideContent()) mirrors
-			// Tiki's own fix for the same problem (Tiki_Hm_User_Config in
-			// their lib/cypht/integration/classes.php): ignore the key
-			// entirely and store settings unencrypted, since Dolibarr's own
-			// auth already gates access to this page.
+			// Not 'file': Hm_User_Config_File encrypts settings using the
+			// "password" as the key, but our SSO password is a fresh
+			// per-request token, so nothing would ever decrypt again.
+			// Custom_User_Config (see CyphtSsoBridge) stores unencrypted
+			// instead, same fix Tiki uses (Tiki_Hm_User_Config).
 			'USER_CONFIG_TYPE' => 'custom:Custom_User_Config',
 			'USER_SETTINGS_DIR' => $dataDir . '/users',
 			'ATTACHMENT_DIR'   => $dataDir . '/attachments',
@@ -91,20 +81,9 @@ class CyphtEnvConfig
 			'ENABLE_MEMCACHED' => 'false',
 			'ENABLE_DEBUG'     => 'false',
 			'DEFAULT_LANGUAGE' => 'en',
-			// "account" must stay in this list: it's the module behind
-			// Cypht's own "Add an E-mail Account"/Servers settings page,
-			// which is how each user configures their real IMAP mailbox
-			// after SSO logs them in (same decoupled pattern Tiki uses).
-			// "api_login" must also stay in: it's what performSsoLogin()
-			// (CyphtSsoBridge) actually calls.
-			// "themes" must also stay in (added for Cypht dev-master):
-			// it's the first-party module that now ships the Bootswatch
-			// theme CSS packs and injects the <link> tag for the active
-			// one on every page (replaces the old external
-			// thomaspark/bootswatch package our vendor bridge targeted).
-			// Without it, requests for modules/themes/assets/*/css/*.css
-			// have no handler and crash instead of loading, which is why
-			// the whole app rendered unstyled.
+			// "account" is where users add their IMAP mailbox after SSO.
+			// "api_login" is what performSsoLogin() calls. "themes" serves
+			// the Bootswatch CSS packs; without it the app renders unstyled.
 			'CYPHT_MODULES'    => 'core,contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters,themes',
 			'DISABLE_FINGERPRINT' => 'true',
 			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
