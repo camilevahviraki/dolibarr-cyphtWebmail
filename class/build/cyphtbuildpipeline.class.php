@@ -91,12 +91,7 @@ class CyphtBuildPipeline
 	}
 
 	/**
-	 * Debug log kept inside the module folder itself (not under
-	 * DOL_DATA_ROOT) for direct filesystem access. Every runProcess()
-	 * call appends the command run, its PID, periodic "still running"
-	 * heartbeats, and how it ended. Overwritten at the start of each
-	 * runConfigGen() call so it only ever reflects the most recent
-	 * attempt.
+	 * Debug log path, reset at the start of each runConfigGen() call.
 	 *
 	 * @return string
 	 */
@@ -116,24 +111,12 @@ class CyphtBuildPipeline
 	}
 
 	/**
-	 * Detects a sudo password prompt or a permission/access-denied error
-	 * in freshly-read process output. Neither should be answered or
-	 * elevated by this module; it runs as whatever user the webserver
-	 * runs as, and the fix for both is a one-time setup step outside the
-	 * browser (fix ownership/permissions, or grant the webserver user
-	 * what it needs).
-	 *
-	 * sudo matters because it can read a password straight from the
-	 * controlling terminal, bypassing the already-closed stdin (see
-	 * runProcess()), and would otherwise hang until the 180s timeout.
-	 * Permission/access-denied errors don't hang, they already fail
-	 * fast, but are common enough on shared hosting and VPS Linux
-	 * deployments (webserver user vs. file owner mismatches) to warrant
-	 * a clear reported reason instead of a bare exit code.
+	 * Detects a sudo password prompt or a permission/access-denied error.
+	 * This module never elevates privileges; a sudo prompt would otherwise
+	 * hang until the 180s timeout since stdin is closed (see runProcess()).
 	 *
 	 * @param string $text Newly-read stdout/stderr content to check.
-	 * @return string|null Human-readable reason if recognized, null
-	 *                      otherwise.
+	 * @return string|null Human-readable reason if recognized, null otherwise.
 	 */
 	private function detectPrivilegeOrCredentialPrompt($text)
 	{
@@ -218,10 +201,8 @@ class CyphtBuildPipeline
 
 		$cmdline = implode(' ', array_map('escapeshellarg', $cmd));
 
-		// stdout/stderr go to real files, not pipes: proc_open() pipe
-		// reads can block indefinitely on Windows regardless of
-		// non-blocking mode, stalling the polling loop below. Plain file
-		// reads aren't affected, so output is polled from disk instead.
+		// Real files, not pipes: pipe reads can block indefinitely on
+		// Windows, stalling the polling loop below.
 		$stdoutFile = $this->paths->getDataDir() . '/build.stdout.tmp';
 		$stderrFile = $this->paths->getDataDir() . '/build.stderr.tmp';
 		@unlink($stdoutFile);
@@ -312,10 +293,8 @@ class CyphtBuildPipeline
 
 			$elapsed = time() - $start;
 
-			// Checked every poll tick, not just once, since a prompt can
-			// appear well after the process starts. Caught here instead
-			// of left to run into the 180s timeout below, so the failure
-			// reports a specific reason instead of a generic timeout.
+			// Checked every tick so a prompt is caught immediately instead
+			// of running into the generic 180s timeout below.
 			$promptReason = $this->detectPrivilegeOrCredentialPrompt($newOut . $newErr);
 			if ($promptReason !== null) {
 				$privilegePromptReason = $promptReason;
@@ -498,7 +477,7 @@ class CyphtBuildPipeline
 
 	/**
 	 * Copy the built site/ folder (inside vendor/, not web-exposed) into
-	 * this module's own public/ folder, which is.
+	 * this module's own public/ folder, which is web-exposed.
 	 *
 	 * @return bool
 	 */

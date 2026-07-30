@@ -247,10 +247,8 @@ class CyphtManager
 	}
 
 	/**
-	 * Raw NDJSON of the most recent completed (or in-progress/interrupted)
-	 * build attempt, same format streamed live during runConfigGen() -
-	 * lets the setup page show it again after a fresh page load instead
-	 * of only while the original request is still open.
+	 * Raw NDJSON log of the most recent build attempt, same format
+	 * streamed live during runConfigGen().
 	 *
 	 * @return string
 	 */
