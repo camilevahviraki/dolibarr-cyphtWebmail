@@ -18,12 +18,9 @@
 /**
  * \file        admin/build/build_cancel.php
  * \ingroup     cyphtWebmail
- * \brief       Tiny AJAX endpoint the Cancel button on setup.php calls.
- *              Runs as a *separate* request from the one actually running
- *              the build - it has no handle on that request's subprocess,
- *              so all it does is drop a flag file that the running
- *              request's own polling loop checks and acts on. See
- *              CyphtManager::requestCancel() / getCancelFlagPath().
+ * \brief       AJAX endpoint for the Cancel button. Runs as a separate
+ *              request from the one running the build, so it just drops a
+ *              flag file that the build's own polling loop checks.
  */
 
 // Load Dolibarr environment
@@ -69,10 +66,7 @@ if (!$user->admin) {
 	exit;
 }
 
-// currentToken(), not newToken() - see the comment in build.php's own
-// token check for why: newToken() rotates the session token as a side
-// effect of being called, so using it here would make this check fail
-// on every request regardless of what the client actually submitted.
+// currentToken(), not newToken(): see build.php's token check.
 if (GETPOST('token', 'alpha') !== currentToken()) {
 	http_response_code(403);
 	echo json_encode(array('success' => false, 'message' => 'Invalid token'));

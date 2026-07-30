@@ -49,18 +49,13 @@ global $conf, $db, $langs, $user;
 
 $langs->loadLangs(array("admin", "cyphtWebmail@cyphtWebmail"));
 
-// This endpoint kicks off a full composer install + Cypht build - same
-// admin-only + CSRF checks as build_cancel.php, just missing here before.
 if (!$user->admin) {
 	http_response_code(403);
 	exit;
 }
 
-// currentToken(), not newToken(): newToken() regenerates the session's
-// stored token as a side effect of being called, so comparing against it
-// here would rotate the token during the very check meant to verify it -
-// guaranteeing a mismatch on every single request. currentToken() reads
-// the value the form was actually rendered with, without changing it.
+// currentToken(), not newToken(): newToken() rotates the session token
+// as a side effect, which would break this check on every request.
 if (GETPOST('token', 'alpha') !== currentToken()) {
 	http_response_code(403);
 	echo "Invalid token";
@@ -76,38 +71,14 @@ if (session_id()) {
     session_write_close();
 }
 
-// One JSON object per line (NDJSON), not raw text: lets the client tell
-// real stdout, real stderr, and our own synthetic status lines apart and
-// color them differently, without needing a second channel (SSE/WebSocket)
-// alongside this already-working chunked response. $chunk itself may
-// contain literal newlines (e.g. multi-line composer output) - that's
-// fine, json_encode() escapes them inside the JSON string, so each
-// "line" of this response is still exactly one JSON object no matter
-// what the underlying tool printed.
+// NDJSON, one {t,c} object per line, so the client can color output by type.
 $buildResult = $manager->runConfigGen(function ($chunk, $type) use ($manager) {
     echo json_encode(array('t' => $type, 'c' => $chunk))."\n";
     $manager->cyphtwebmail_flush_now();
 });
 
-// Not reopening the session here: by this point output has already been
-// streamed to the browser (that's the whole point), so headers are always
-// already sent and session_start() would only ever produce a "Session
-// cannot be started after headers have already been sent" warning that
-// bleeds into the build log. Nothing after this point needs $_SESSION -
-// this request just reports success/failure and ends; the next real page
-// load starts its own session normally.
-
 if (!$buildResult['success']) {
-    // http_response_code() is a no-op here (headers went out with the
-    // first streamed chunk above already) - kept anyway as an honest
-    // reflection of the outcome for anything inspecting the response
-    // object, even though the browser won't act on it at this point.
-    http_response_code(500);
-    // Same NDJSON envelope as every chunk above, not raw text - a plain
-    // echo here would be a non-JSON line breaking the client's parser
-    // right at the most important message (this build's final failure
-    // reason), and 'err' colors it red like the failures already
-    // streamed above it.
+    http_response_code(500); // no-op once headers are sent, kept for correctness
     echo json_encode(array(
         't' => 'err',
         'c' => "\n\n".$langs->trans("CyphtWebmailBuildFailed").": ".$buildResult['error'],
