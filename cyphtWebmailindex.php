@@ -19,13 +19,9 @@
  * \file        cyphtWebmailindex.php
  * \ingroup     cyphtWebmail
  * \brief       Entry point reached from the top menu. Logs the current
- *              Dolibarr user into Cypht via its official same-subdomain
- *              "functional login" SSO option (see
+ *              Dolibarr user into Cypht via SSO (see
  *              CyphtManager::performSsoLogin()) before embedding the
- *              already-built Cypht app, so the iframe opens already
- *              authenticated as that user. Each user still adds their
- *              real IMAP mailbox separately via Cypht's own Servers page,
- *              exactly as Tiki's integration does.
+ *              already-built app, so the iframe opens already authenticated.
  */
 
 // Load Dolibarr environment
