@@ -19,13 +19,7 @@
  * \file        class/state/cyphtinstallstate.class.php
  * \ingroup     cyphtWebmail
  * \brief       Path resolution and installed/built-version bookkeeping for
- *              the vendored Cypht app. Extracted out of CyphtManager, which
- *              had grown too large - see class/cyphtmanager.class.php for
- *              the facade that wires this together with its siblings.
- *
- * No side effects beyond reading disk/llx_const; nothing here writes
- * anything except getDataDir()'s dol_mkdir() calls, which just ensure the
- * module's own data subfolders exist.
+ *              the vendored Cypht app.
  */
 class CyphtInstallState
 {

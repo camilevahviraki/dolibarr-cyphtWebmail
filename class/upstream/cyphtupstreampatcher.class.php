@@ -20,12 +20,9 @@ require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
 /**
  * \file        class/upstream/cyphtupstreampatcher.class.php
  * \ingroup     cyphtWebmail
- * \brief       Patches a genuine upstream Cypht bug that only surfaces once
- *              a module's functions.php gets require()'d twice in the same
- *              process, which performSsoLogin()'s "functional login" call
- *              does. Extracted out of CyphtManager, which had grown too
- *              large - see class/cyphtmanager.class.php for the facade
- *              that wires this together with its siblings.
+ * \brief       Patches an upstream Cypht bug that surfaces once a module's
+ *              functions.php gets require()'d twice in the same process,
+ *              which performSsoLogin()'s "functional login" call does.
  */
 class CyphtUpstreamPatcher
 {
@@ -48,26 +45,18 @@ class CyphtUpstreamPatcher
 	}
 
 	/**
-	 * Most functions in modules/core/functions.php are wrapped in
-	 * "if (!hm_exists('name')) { function name(...) {...} }" so the file
-	 * survives being require()'d more than once in the same process - but
-	 * a handful are missing that guard (found by scanning the file:
-	 * get_special_folders, privacy_setting_callback,
-	 * getSettingsSectionOutput, isPageConfigured as of Cypht 2.11.1).
-	 * Harmless normally, because nothing used to load Cypht's modules
-	 * twice in one PHP process - but performSsoLogin()'s "functional
-	 * login" call (modules/api_login/api.php) does exactly that, causing
-	 * a fatal "Cannot redeclare ...()" the moment SSO is used.
+	 * Most functions in modules/core/functions.php guard against being
+	 * require()'d twice with "if (!hm_exists('name')) { ... }", but a few
+	 * are missing that guard (as of Cypht 2.11.1). Harmless normally, but
+	 * performSsoLogin()'s "functional login" call does load modules twice
+	 * in one process, causing a fatal "Cannot redeclare ...()".
 	 *
-	 * Rather than hardcode that specific list (fragile - the exact set
-	 * could shift on a future Cypht release), this scans the file with
-	 * PHP's own tokenizer and wraps *every* top-level unguarded function
-	 * the same way its already-guarded neighbors are, skipping anything
-	 * already wrapped so repeat builds stay idempotent.
+	 * Rather than hardcode that list, which could shift on a future Cypht
+	 * release, this scans the file with PHP's tokenizer and wraps every
+	 * unguarded top-level function, skipping anything already wrapped.
 	 *
-	 * Applied by the build process (like CyphtSsoBridge::writeSiteAuthOverride()
-	 * is) rather than hand-edited in vendor/, so "composer install"
-	 * re-fetching this package never silently reverts it.
+	 * Applied by the build process, not hand-edited in vendor/, so
+	 * "composer install" re-fetching this package never reverts it.
 	 *
 	 * @return bool
 	 */
@@ -75,7 +64,7 @@ class CyphtUpstreamPatcher
 	{
 		$path = $this->paths->getCyphtPath() . '/modules/core/functions.php';
 		if (!is_readable($path)) {
-			return true; // nothing to patch yet - composer install would have already failed if this matters
+			return true; // nothing to patch yet
 		}
 
 		$content = file_get_contents($path);
@@ -98,18 +87,11 @@ class CyphtUpstreamPatcher
 	}
 
 	/**
-	 * Wrap every top-level "function name(...) { ... }" in $content that
-	 * isn't already guarded by an immediately-preceding
-	 * "hm_exists('name')" check, in "if (!hm_exists('name')) { ... }" -
-	 * matching the convention the file itself already uses elsewhere.
-	 * Skips anonymous closures (no name) and anything nested inside a
-	 * class body (class method redeclaration is a different failure mode
-	 * this guard doesn't apply to, and none of the files this is used on
-	 * currently define classes, but this stays defensive against that).
-	 *
-	 * Uses PHP's own tokenizer instead of brace-counting by hand so
-	 * function boundaries are found correctly regardless of braces
-	 * appearing inside strings/comments.
+	 * Wraps every unguarded top-level "function name(...) { ... }" in
+	 * "if (!hm_exists('name')) { ... }". Skips anonymous closures and
+	 * anything nested inside a class body. Uses PHP's tokenizer instead
+	 * of brace-counting so boundaries are found correctly even with
+	 * braces inside strings/comments.
 	 *
 	 * @param string $content
 	 * @return string Patched content (identical to input if nothing to do)
