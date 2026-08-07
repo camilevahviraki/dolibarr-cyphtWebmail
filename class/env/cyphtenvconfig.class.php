@@ -86,11 +86,8 @@ class CyphtEnvConfig
 			'IMAP_AUTH_SERVER' => getDolGlobalString('CYPHTWEBMAIL_IMAP_SERVER', 'localhost'),
 			'IMAP_AUTH_PORT'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_PORT', '993'),
 			'IMAP_AUTH_TLS'    => getDolGlobalString('CYPHTWEBMAIL_IMAP_TLS', 'true'),
-			// Not 'file': Hm_User_Config_File encrypts settings using the
-			// "password" as the key, but our SSO password is a fresh
-			// per-request token, so nothing would ever decrypt again.
-			// Custom_User_Config (see CyphtSsoBridge) stores unencrypted
-			// instead, same fix Tiki uses (Tiki_Hm_User_Config).
+			// Not 'file': Hm_User_Config_File keys its encryption on the login
+			// password, which under SSO is a fresh token every request.
 			'USER_CONFIG_TYPE' => 'custom:Custom_User_Config',
 			'USER_SETTINGS_DIR' => $dataDir . '/users',
 			'ATTACHMENT_DIR'   => $dataDir . '/attachments',
