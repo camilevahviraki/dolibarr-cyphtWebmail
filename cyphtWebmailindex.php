@@ -98,41 +98,10 @@ if (!$manager->isPublished()) {
 		'style="width:100%; height: calc(100vh - 220px); min-height: 500px; border: none;" '.
 		'title="Cypht Webmail"></iframe>';
 
-	// Mirror the frame's location into this page's URL so a reload returns to
-	// the same Cypht page. Polled, not driven by the frame's load event:
-	// Cypht is a single page app and its router uses history.pushState (see
-	// modules/core/navigation/navigation.js), which fires no event a parent
-	// document can observe. Same origin, so the location is readable directly.
-	print '<script type="text/javascript">
-(function () {
-	var frame = document.getElementById("cyphtwebmail-frame");
-	if (!frame || !window.history || !window.history.replaceState) {
-		return;
-	}
-	var last = null;
-	function sync() {
-		var query;
-		try {
-			query = frame.contentWindow.location.search.replace(/^\?/, "");
-		} catch (e) {
-			return;
-		}
-		if (query === last) {
-			return;
-		}
-		last = query;
-		var url = new URL(window.location.href);
-		if (query) {
-			url.searchParams.set("cypht", query);
-		} else {
-			url.searchParams.delete("cypht");
-		}
-		window.history.replaceState(null, "", url.toString());
-	}
-	frame.addEventListener("load", sync);
-	setInterval(sync, 400);
-})();
-</script>';
+	$syncScript = dol_buildpath('/cyphtWebmail/js/cypht-url-sync.js', 1);
+	$syncVersion = @filemtime(__DIR__.'/js/cypht-url-sync.js');
+
+	print '<script src="'.dol_escape_htmltag($syncScript.($syncVersion ? '?v='.$syncVersion : '')).'"></script>';
 }
 
 llxFooter();
