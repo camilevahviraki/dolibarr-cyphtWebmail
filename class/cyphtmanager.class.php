@@ -41,6 +41,7 @@ require_once __DIR__ . '/env/cyphtenvconfig.class.php';
 require_once __DIR__ . '/vendor/cyphtvendorbridge.class.php';
 require_once __DIR__ . '/sso/cyphtssobridge.class.php';
 require_once __DIR__ . '/upstream/cyphtupstreampatcher.class.php';
+require_once __DIR__ . '/contacts/cyphtcontactsbridge.class.php';
 require_once __DIR__ . '/build/cyphtbuildpipeline.class.php';
 
 class CyphtManager
@@ -81,6 +82,11 @@ class CyphtManager
 	private $upstreamPatcher;
 
 	/**
+	 * @var CyphtContactsBridge
+	 */
+	private $contactsBridge;
+
+	/**
 	 * @var CyphtBuildPipeline
 	 */
 	private $buildPipeline;
@@ -97,14 +103,36 @@ class CyphtManager
 		$this->envConfig = new CyphtEnvConfig($this->paths, $this->sso);
 		$this->vendorBridge = new CyphtVendorBridge($this->paths);
 		$this->upstreamPatcher = new CyphtUpstreamPatcher($this->paths);
+		$this->contactsBridge = new CyphtContactsBridge($db, $this->paths);
 		$this->buildPipeline = new CyphtBuildPipeline(
 			$db,
 			$this->paths,
 			$this->envConfig,
 			$this->vendorBridge,
 			$this->sso,
-			$this->upstreamPatcher
+			$this->upstreamPatcher,
+			$this->contactsBridge
 		);
+	}
+
+	/**
+	 * Settings path for a user, used by the USER_DELETE trigger.
+	 *
+	 * @param string $login Dolibarr login
+	 * @return string
+	 */
+	public function getUserSettingsPath($login)
+	{
+		return $this->sso->getUserSettingsPath($login);
+	}
+
+	/**
+	 * @param string $login Dolibarr login
+	 * @return string
+	 */
+	public function getLegacyUserSettingsPath($login)
+	{
+		return $this->sso->getLegacyUserSettingsPath($login);
 	}
 
 	// ---- CyphtInstallState ----
