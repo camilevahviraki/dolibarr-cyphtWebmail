@@ -90,7 +90,13 @@ class modcyphtWebmail extends DolibarrModules
 		// If file is in theme/yourtheme/img directory under name object_pictovalue.png, use this->picto='pictovalue'
 		// If file is in module/img directory under name object_pictovalue.png, use this->picto='pictovalue@module'
 		// To use a supported fa-xxx css style of font awesome, use this->picto='xxx'
-		$this->picto = 'fa-file';
+		// Syntax is 'fa-<key>_<prefix>_<color>_<size>', parsed in img_picto()
+		// (core/lib/functions.lib.php). Deliberately not Dolibarr's built-in
+		// 'email' picto: modMailing, modEmailCollector and modNotification all
+		// already use that one, and two of them are linked from this module's
+		// own left menu, so sharing it would make three different things look
+		// identical. Green ties it to Cypht's own mark.
+		$this->picto = 'fa-envelope-open-text_fas_#1d9e75';
 
 		// Define some features supported by module (triggers, login, substitutions, menus, css, etc...)
 		// If your module use the parameter "core_enabled" and you would like to activate the parts in all entities (Multicompany):
@@ -107,7 +113,10 @@ class modcyphtWebmail extends DolibarrModules
 		//	)
 		$this->module_parts = array(
 			// Set this to 1 if module has its own trigger directory (core/triggers)
-			'triggers' => 0,
+			// core/triggers/interface_99_modcyphtWebmail_CyphtWebmailTriggers
+			// deletes a user's Cypht settings file on USER_DELETE. Nothing
+			// else knows that file exists.
+			'triggers' => 1,
 			// Set this to 1 if module has its own login method file (core/login)
 			'login' => 0,
 			// Set this to 1 if module has its own substitution function file (core/substitutions)
@@ -349,6 +358,149 @@ class modcyphtWebmail extends DolibarrModules
 			'user' => 2, // 0=Menu for internal users, 1=external users, 2=both
 		);
 		/* END MODULEBUILDER TOPMENU */
+
+		/* BEGIN LEFTMENU CYPHTWEBMAIL */
+		// Deliberately does NOT mirror Cypht's own sidebar. Cypht already owns
+		// Compose, Drafts, Flagged, History, Junk, Sent, Trash, Unread,
+		// Contacts, Servers, Profiles, Folders, Filters and Block List, and
+		// repeating them 30px apart would just be two navigations for the same
+		// thing. This column carries only what Cypht cannot do: Dolibarr work
+		// queues, the mail automation Dolibarr owns, and module setup.
+		//
+		// Note 'fk_mainmenu=cyphtwebmail' is lower case, matching the
+		// 'mainmenu' value on the top entry above. The modulebuilder
+		// scaffolding this replaces used 'cyphtWebmail', which would never
+		// have matched, so none of those entries could ever have appeared.
+
+		// --- Back to the mail client -------------------------------------
+		// Every other entry in this column navigates away from the webmail
+		// page, and the only route back would otherwise be the top menu. This
+		// is not a duplicate of Cypht's own sidebar: Cypht has no way to
+		// return you to the Dolibarr page that embeds it.
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuWebmail',
+			'prefix' => img_picto('', $this->picto, 'class="pictofixedwidth valignmiddle paddingright"'),
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_index',
+			'url' => '/cyphtWebmail/cyphtWebmailindex.php',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => "isModEnabled('cyphtwebmail')",
+			'perms' => '1',
+			'target' => '',
+			'user' => 2,
+		);
+
+		// --- Work queues -------------------------------------------------
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuOpenTickets',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_tickets',
+			'url' => '/ticket/list.php?search_fk_statut[]=openall',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => "isModEnabled('ticket')",
+			'perms' => '$user->hasRight("ticket", "read")',
+			'target' => '',
+			'user' => 2,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuOverdueInvoices',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_invoices',
+			// search_option=late is read at compta/facture/list.php:201 and
+			// forces search_status to unpaid; same pair core's own menu uses.
+			'url' => '/compta/facture/list.php?search_option=late&search_status=1',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			// The module key is 'invoice'; the permission is still 'facture'.
+			'enabled' => "isModEnabled('invoice')",
+			'perms' => '$user->hasRight("facture", "lire")',
+			'target' => '',
+			'user' => 2,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuTodayAgenda',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_agenda',
+			'url' => '/comm/action/index.php',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => "isModEnabled('agenda')",
+			'perms' => '$user->hasRight("agenda", "myactions", "read")',
+			'target' => '',
+			'user' => 2,
+		);
+
+		// --- Mail automation Dolibarr owns -------------------------------
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuEmailCollector',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_collector',
+			'url' => '/admin/emailcollector_list.php',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => "isModEnabled('emailcollector')",
+			// EmailCollector declares no rights of its own: it is a setup area.
+			'perms' => '$user->admin',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuEmailTemplates',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_templates',
+			'url' => '/admin/mails_templates.php',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => '1',
+			'perms' => '$user->admin',
+			'target' => '',
+			'user' => 0,
+		);
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuMassEmailing',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_mailing',
+			'url' => '/comm/mailing/list.php',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => "isModEnabled('mailing')",
+			'perms' => '$user->hasRight("mailing", "lire")',
+			'target' => '',
+			'user' => 2,
+		);
+
+		// --- Setup -------------------------------------------------------
+		$this->menu[$r++] = array(
+			'fk_menu' => 'fk_mainmenu=cyphtwebmail',
+			'type' => 'left',
+			'titre' => 'CyphtMenuModuleSetup',
+			'mainmenu' => 'cyphtwebmail',
+			'leftmenu' => 'cyphtwebmail_setup',
+			'url' => '/cyphtWebmail/admin/setup.php',
+			'langs' => 'cyphtwebmail@cyphtwebmail',
+			'position' => 1000 + $r,
+			'enabled' => "isModEnabled('cyphtwebmail')",
+			'perms' => '$user->admin',
+			'target' => '',
+			'user' => 0,
+		);
+		/* END LEFTMENU CYPHTWEBMAIL */
 
 		/* BEGIN MODULEBUILDER LEFTMENU MYOBJECT */
 		/*
