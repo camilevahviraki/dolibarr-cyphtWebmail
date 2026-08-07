@@ -79,15 +79,10 @@ class CyphtVendorBridge
 			return false;
 		}
 
-		// Same flat-dependency problem as autoload.php above, but for raw
-		// asset directories (Bootstrap, Bootswatch) that config_gen.php
-		// reads directly off disk. Symlink if the filesystem allows it,
-		// otherwise fall back to a recursive copy. Torn down and
-		// recreated every build so neither can go stale unnoticed.
-		// Previously torn down and re-copied on every build. symlink() needs
-		// elevation on Windows, so it always fell through to copyRecursive():
-		// thousands of Bootstrap/Bootswatch files deleted and rewritten each
-		// time, which ran past the request limit and killed the build.
+		// Same flat-dependency problem as autoload.php above, but for the raw
+		// asset directories (Bootstrap, Bootswatch) config_gen.php reads off
+		// disk. Rebuilt only when the installed versions change: copying them
+		// takes minutes and overruns the request.
 		$moduleVendor = $this->paths->getModuleRoot() . '/vendor';
 		foreach (array('twbs', 'thomaspark') as $vendor) {
 			$target = $moduleVendor . '/' . $vendor;
