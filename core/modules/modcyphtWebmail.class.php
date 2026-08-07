@@ -360,17 +360,12 @@ class modcyphtWebmail extends DolibarrModules
 		/* END MODULEBUILDER TOPMENU */
 
 		/* BEGIN LEFTMENU CYPHTWEBMAIL */
-		// Deliberately does NOT mirror Cypht's own sidebar. Cypht already owns
-		// Compose, Drafts, Flagged, History, Junk, Sent, Trash, Unread,
-		// Contacts, Servers, Profiles, Folders, Filters and Block List, and
-		// repeating them 30px apart would just be two navigations for the same
-		// thing. This column carries only what Cypht cannot do: Dolibarr work
-		// queues, the mail automation Dolibarr owns, and module setup.
+		// Carries only what Cypht cannot: Dolibarr work queues, the mail
+		// automation Dolibarr owns, and module setup. Cypht's own sidebar
+		// already covers mail, contacts, servers and filters.
 		//
-		// Note 'fk_mainmenu=cyphtwebmail' is lower case, matching the
-		// 'mainmenu' value on the top entry above. The modulebuilder
-		// scaffolding this replaces used 'cyphtWebmail', which would never
-		// have matched, so none of those entries could ever have appeared.
+		// 'fk_mainmenu=cyphtwebmail' must match the lower case 'mainmenu'
+		// value on the top entry, or the entries never appear.
 
 		// --- Back to the mail client -------------------------------------
 		// Every other entry in this column navigates away from the webmail
