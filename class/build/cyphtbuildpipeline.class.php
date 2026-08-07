@@ -20,7 +20,7 @@ require_once __DIR__ . '/../env/cyphtenvconfig.class.php';
 require_once __DIR__ . '/../vendor/cyphtvendorbridge.class.php';
 require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
 require_once __DIR__ . '/../upstream/cyphtupstreampatcher.class.php';
-require_once __DIR__ . '/../contacts/cyphtcontactsbridge.class.php';
+require_once __DIR__ . '/../cypht/cyphtmoduleinstaller.class.php';
 
 /**
  * \file        class/build/cyphtbuildpipeline.class.php
@@ -68,9 +68,9 @@ class CyphtBuildPipeline
 	private $upstreamPatcher;
 
 	/**
-	 * @var CyphtContactsBridge
+	 * @var CyphtModuleInstaller
 	 */
-	private $contactsBridge;
+	private $moduleInstaller;
 
 	/**
 	 * @param DoliDB $db
@@ -79,7 +79,7 @@ class CyphtBuildPipeline
 	 * @param CyphtVendorBridge $vendorBridge
 	 * @param CyphtSsoBridge $sso
 	 * @param CyphtUpstreamPatcher $upstreamPatcher
-	 * @param CyphtContactsBridge $contactsBridge
+	 * @param CyphtModuleInstaller $moduleInstaller
 	 */
 	public function __construct(
 		$db,
@@ -88,7 +88,7 @@ class CyphtBuildPipeline
 		CyphtVendorBridge $vendorBridge,
 		CyphtSsoBridge $sso,
 		CyphtUpstreamPatcher $upstreamPatcher,
-		CyphtContactsBridge $contactsBridge
+		CyphtModuleInstaller $moduleInstaller
 	) {
 		$this->db = $db;
 		$this->paths = $paths;
@@ -96,7 +96,7 @@ class CyphtBuildPipeline
 		$this->vendorBridge = $vendorBridge;
 		$this->sso = $sso;
 		$this->upstreamPatcher = $upstreamPatcher;
-		$this->contactsBridge = $contactsBridge;
+		$this->moduleInstaller = $moduleInstaller;
 	}
 
 	/**
@@ -698,23 +698,14 @@ class CyphtBuildPipeline
 		}
 		$emit("vendor/ bridge shim in place (Cypht installed as a flat dependency, see comment in the file).\n");
 
-		if (!$this->sso->writeSiteAuthOverride()) {
-			$this->error = $this->sso->error;
+		// Before config_gen.php: it scans modules/<name>/setup.php for every
+		// module in CYPHT_MODULES, so the files must be on disk by then.
+		if (!$this->moduleInstaller->installAll()) {
+			$this->error = $this->moduleInstaller->error;
 			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
-		$emit("Dolibarr SSO auth override written to modules/site/lib.php.\n");
-
-		// Must happen before config_gen.php: it scans
-		// modules/<name>/setup.php for every module in CYPHT_MODULES to
-		// collect input filters and page registrations, so the files have
-		// to exist on disk by the time it runs.
-		if (!$this->contactsBridge->writeModuleSet()) {
-			$this->error = $this->contactsBridge->error;
-			$emit($this->error . "\n", 'err');
-			return array('success' => false, 'output' => $log, 'error' => $this->error);
-		}
-		$emit("Dolibarr contact source written to modules/" . CyphtContactsBridge::MODULE_NAME . "/.\n");
+		$emit("Cypht module sets installed: " . implode(', ', $this->moduleInstaller->listModuleSets()) . ".\n");
 
 		if (!$this->upstreamPatcher->patchCoreFunctionsGuard()) {
 			$this->error = $this->upstreamPatcher->error;
