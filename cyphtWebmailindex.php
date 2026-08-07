@@ -56,6 +56,15 @@ if (!isModEnabled('cyphtwebmail')) {
 
 $manager = new CyphtManager($db);
 
+// Current Cypht page, carried in one opaque parameter holding Cypht's own
+// query string. Nested rather than mirrored because Cypht uses page/id/uid
+// and Dolibarr uses action/id/token: merging the namespaces collides on "id".
+// Whitelisted here because it ends up in an iframe src.
+$cyphtQuery = GETPOST('cypht', 'none');
+if (!is_string($cyphtQuery) || !preg_match('/^[A-Za-z0-9_\-\.=&%+]{0,300}$/', $cyphtQuery)) {
+	$cyphtQuery = '';
+}
+
 // Must happen before any HTML output (llxHeader() included): SSO login
 // sets Cypht's hm_id/hm_session cookies via setcookie(), which silently
 // fails once headers have already been sent.
@@ -81,9 +90,49 @@ if (!$manager->isPublished()) {
 		// blocking access to the page entirely.
 		print '<div class="warning" style="padding: 15px;">'.dol_escape_htmltag($manager->error).'</div>';
 	}
-	print '<iframe src="'.dol_escape_htmltag($publicUrl).'" '.
+	// SSO is still passed the bare $publicUrl: it parses it for the cookie
+	// domain/path, where a query string has no place.
+	$frameUrl = $publicUrl.($cyphtQuery !== '' ? '?'.$cyphtQuery : '');
+
+	print '<iframe id="cyphtwebmail-frame" src="'.dol_escape_htmltag($frameUrl).'" '.
 		'style="width:100%; height: calc(100vh - 220px); min-height: 500px; border: none;" '.
 		'title="Cypht Webmail"></iframe>';
+
+	// Mirror the frame's location into this page's URL so a reload returns to
+	// the same Cypht page. Polled, not driven by the frame's load event:
+	// Cypht is a single page app and its router uses history.pushState (see
+	// modules/core/navigation/navigation.js), which fires no event a parent
+	// document can observe. Same origin, so the location is readable directly.
+	print '<script type="text/javascript">
+(function () {
+	var frame = document.getElementById("cyphtwebmail-frame");
+	if (!frame || !window.history || !window.history.replaceState) {
+		return;
+	}
+	var last = null;
+	function sync() {
+		var query;
+		try {
+			query = frame.contentWindow.location.search.replace(/^\?/, "");
+		} catch (e) {
+			return;
+		}
+		if (query === last) {
+			return;
+		}
+		last = query;
+		var url = new URL(window.location.href);
+		if (query) {
+			url.searchParams.set("cypht", query);
+		} else {
+			url.searchParams.delete("cypht");
+		}
+		window.history.replaceState(null, "", url.toString());
+	}
+	frame.addEventListener("load", sync);
+	setInterval(sync, 400);
+})();
+</script>';
 }
 
 llxFooter();
