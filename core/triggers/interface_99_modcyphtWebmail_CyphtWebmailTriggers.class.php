@@ -63,7 +63,7 @@ class InterfaceCyphtWebmailTriggers extends DolibarrTriggers
 
 	/**
 	 * Remove the settings file belonging to a deleted user.
- *
+	 *
 	 * @param User $object The user that was just deleted
 	 * @return int
 	 */
@@ -91,7 +91,8 @@ class InterfaceCyphtWebmailTriggers extends DolibarrTriggers
 			if (@unlink($path)) {
 				dol_syslog("cyphtWebmail: removed webmail settings for deleted user ".$login." (".$path.")");
 			} else {
-				// Deliberately not an error return. This trigger runs inside
+				// Not an error return: this runs inside the deletion
+				// transaction, so failing here would undo the deletion.
 				dol_syslog("cyphtWebmail: could not remove ".$path." for deleted user ".$login, LOG_ERR);
 			}
 		}
@@ -100,8 +101,9 @@ class InterfaceCyphtWebmailTriggers extends DolibarrTriggers
 	}
 
 	/**
-	 * Follow a login rename.
- *
+	 * Follow a login rename. The settings filename derives from the login,
+	 * so without this a rename orphans the file.
+	 *
 	 * @param User $object The user that was just updated
 	 * @return int
 	 */
