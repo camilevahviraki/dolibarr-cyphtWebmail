@@ -155,9 +155,14 @@ print '</td></tr>';
 
 print '</table>';
 
+// Three cases: this server can build, it cannot and nothing is built yet, or
+// it cannot but a build is already live (done from a terminal, or shipped in).
+// Only the middle one is a problem worth a warning.
 $requirements = $manager->checkBuildRequirements();
+$canBuildHere = !empty($requirements['ok']);
+$published = $manager->isPublished();
 
-if (!$requirements['ok']) {
+if (!$canBuildHere && !$published) {
 	print '<div class="warning" style="padding: 12px; margin-top: 10px;">';
 	print '<strong>'.$langs->trans("CyphtWebmailCannotBuildHere").'</strong><br><br>';
 
@@ -176,6 +181,13 @@ if (!$requirements['ok']) {
 	print 'php scripts/build.php';
 	print '</pre>';
 	print '</div>';
+} elseif (!$canBuildHere) {
+	// Already built and working, just not rebuildable from here. No button and
+	// no log viewer, since neither can do anything; one line saying where to go.
+	print '<div class="center opacitymedium" style="margin-top: 10px;">';
+	print $langs->trans("CyphtWebmailRebuildFromShell");
+	print ' <code>php scripts/build.php</code>';
+	print '</div>';
 } else {
 	print '<div class="center" style="margin-top: 10px;">';
 	print '<form id="cypht-build-form">';
@@ -186,29 +198,33 @@ if (!$requirements['ok']) {
 	print '</div>';
 }
 
-// 'out' = real child-process output, 'err' = our own failure messages,
-// 'info' = our own step/status lines. Stderr is not colored red just for
-// being stderr; see CyphtPipeline::runProcess().
-print '<style>
+// The log viewer only ever shows browser builds, so it follows the button:
+// where one cannot run, the other has nothing to show.
+if ($canBuildHere) {
+	// 'out' = real child-process output, 'err' = our own failure messages,
+	// 'info' = our own step/status lines. Stderr is not colored red just for
+	// being stderr; see CyphtPipeline::runProcess().
+	print '<style>
 #cyphtwebmail-log .log-out { color: #d4d4d4; }
 #cyphtwebmail-log .log-err { color: #f14c4c; }
 #cyphtwebmail-log .log-info { color: #4fc1ff; font-weight: bold; }
 </style>';
-$lastBuildLog = $manager->getLastBuildLog();
+	$lastBuildLog = $manager->getLastBuildLog();
 
-// Hidden if no build has ever run; setup.js un-hides it once one starts.
-print '<div class="center" style="margin-top: 10px;">';
-print '<button type="button" id="cyphtwebmail-log-toggle" class="button" data-show-text="'.$langs->trans("CyphtWebmailShowLog").'" data-hide-text="'.$langs->trans("CyphtWebmailHideLog").'" style="'.($lastBuildLog === '' ? 'display:none;' : '').'">'.$langs->trans("CyphtWebmailShowLog").'</button>';
-print '</div>';
-print '<div id="cyphtwebmail-log-wrap" style="display:none;">';
-print '<pre id="cyphtwebmail-log" style="background:#1e1e1e; color:#d4d4d4; font-family:Consolas,\'Courier New\',monospace; font-size:12px; line-height:1.5; padding:12px 14px; max-height:500px; overflow:auto; border-radius:6px; border:1px solid #333; white-space:pre-wrap; word-break:break-all; margin-top:10px;"></pre>';
-print '</div>';
+	// Hidden if no build has ever run; setup.js un-hides it once one starts.
+	print '<div class="center" style="margin-top: 10px;">';
+	print '<button type="button" id="cyphtwebmail-log-toggle" class="button" data-show-text="'.$langs->trans("CyphtWebmailShowLog").'" data-hide-text="'.$langs->trans("CyphtWebmailHideLog").'" style="'.($lastBuildLog === '' ? 'display:none;' : '').'">'.$langs->trans("CyphtWebmailShowLog").'</button>';
+	print '</div>';
+	print '<div id="cyphtwebmail-log-wrap" style="display:none;">';
+	print '<pre id="cyphtwebmail-log" style="background:#1e1e1e; color:#d4d4d4; font-family:Consolas,\'Courier New\',monospace; font-size:12px; line-height:1.5; padding:12px 14px; max-height:500px; overflow:auto; border-radius:6px; border:1px solid #333; white-space:pre-wrap; word-break:break-all; margin-top:10px;"></pre>';
+	print '</div>';
 
-// json_encode() escapes "/" to "\/", preventing a literal "</script>"
-// in the log from closing this tag early.
-print '<script type="application/json" id="cyphtwebmail-last-log">'.json_encode($lastBuildLog).'</script>';
+	// json_encode() escapes "/" to "\/", preventing a literal "</script>"
+	// in the log from closing this tag early.
+	print '<script type="application/json" id="cyphtwebmail-last-log">'.json_encode($lastBuildLog).'</script>';
 
-print '<script src="'.dol_buildpath('/cyphtWebmail/js/admin/setup.js', 1).'"></script>';
+	print '<script src="'.dol_buildpath('/cyphtWebmail/js/admin/setup.js', 1).'"></script>';
+}
 
 llxFooter();
 $db->close();
