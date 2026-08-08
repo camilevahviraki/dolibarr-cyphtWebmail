@@ -289,7 +289,7 @@ Good models to copy: `gmail_contacts` (smallest complete set), `ldap_contacts`
 ### 2. Register it
 
 Add the name to `CYPHT_MODULES` in
-`class/env/cyphtenvconfig.class.php`:
+`class/install/environment.class.php`:
 
 ```php
 'CYPHT_MODULES' => 'core,contacts,dolibarr_contacts,<your_module>,imap,smtp,...',
@@ -357,38 +357,56 @@ module set with `Hm_Environment::get()`.
 
 ```
 cyphtWebmail/
-├── admin/setup.php              settings + Generate button
-├── bridge/                      HTTP endpoints Cypht calls back into Dolibarr
+├── index.php                       the Dolibarr page hosting the Cypht iframe
+├── admin/
+│   ├── setup.php                   settings, build status, Generate button
+│   └── build/                      endpoints the Generate button calls
+│       ├── build.php               runs the build, streams the log
+│       └── build_cancel.php
+├── bridge/                         HTTP endpoints Cypht calls back into Dolibarr
 │   └── contacts.php
 ├── class/
-│   ├── cyphtmanager.class.php   facade; every caller uses this
-│   ├── build/                   the three-step build pipeline
-│   ├── contacts/                Dolibarr-side config for the contacts module set
-│   ├── cypht/                   installs cypht/modules/* into the vendored Cypht
-│   ├── env/                     builds and writes Cypht's .env
-│   ├── sso/                     HMAC secrets, tokens, functional login
-│   ├── state/                   paths and version bookkeeping
-│   ├── upstream/                patches for upstream Cypht gaps
-│   └── vendor/                  flat-Composer-layout bridge
+│   ├── webmail.class.php           facade; every caller uses this
+│   ├── auth/                       secrets, HMAC assertions, SSO login
+│   │   ├── token.class.php
+│   │   └── login.class.php
+│   ├── install/                    everything that builds or installs
+│   │   ├── paths.class.php         paths, installed/built version bookkeeping
+│   │   ├── environment.class.php   builds and writes Cypht's .env
+│   │   ├── vendorlayout.class.php  flat-Composer-layout bridge
+│   │   ├── moduleinstaller.class.php  installs cypht/modules/* into vendored Cypht
+│   │   ├── upstreampatches.class.php  patches upstream Cypht gaps
+│   │   └── pipeline.class.php      the three-step build
+│   └── integration/                Dolibarr data exposed to Cypht
+│       └── contactsource.class.php
 ├── core/
-│   ├── modules/                 Dolibarr module descriptor
-│   └── triggers/                USER_DELETE / USER_MODIFY cleanup
-├── cypht/modules/               ★ our Cypht module sets, native layout
-│   ├── dolibarr_contacts/
-│   └── site/
-├── docs/upstream-patches/       patches staged for upstream Cypht
-├── js/                          browser code for the Dolibarr-side pages
-│   ├── cypht-url-sync.js        keeps the URL in step with the iframe
-│   └── admin/setup.js           build page
-├── langs/en_US/                 translations
-├── public/                      built app (generated, git-ignored)
-├── sql/                         table definitions, run on activation
-└── vendor/                      Composer (Cypht lives here)
+│   ├── modules/                    Dolibarr module descriptor
+│   └── triggers/                   USER_DELETE / USER_MODIFY cleanup
+├── cypht/modules/                  ★ our Cypht module sets, native layout
+│   ├── dolibarr_contacts/          contacts as a Cypht address book
+│   └── site/                       session, auth and DB-backed user config
+├── scripts/
+│   └── build.php                   command line build, see above
+├── js/                             browser code for the Dolibarr-side pages
+│   ├── cypht-url-sync.js           keeps the URL in step with the iframe
+│   └── admin/setup.js              build page
+├── langs/en_US/                    translations
+├── sql/                            table definitions, run on activation
+├── docs/upstream-patches/    
+├── composer.json                   the jason-munro/cypht version constraint
+├── composer.lock                   the exact version a build resolves to
+├── public/                         built app (generated, git-ignored)
+└── vendor/                         Composer (Cypht lives here, git-ignored)
 ```
 
-Front-end code belongs in `js/` and `css/`, loaded with `dol_buildpath()` and a
-`filemtime` cache-buster, never inlined into a PHP string. Anything that runs
-inside Cypht instead goes in a module set under `cypht/modules/`.
+The split inside `class/` is the one worth keeping to. `install/` is everything
+that puts Cypht on disk and compiles it, `auth/` is everything that proves who a
+user is, `integration/` is Dolibarr data made available to Cypht. New bridge
+endpoints get a class in `integration/`, not in `install/`.
+
+Front-end code belongs in `js/`, loaded with `dol_buildpath()` and a `filemtime`
+cache-buster, never inlined into a PHP string. Anything that runs inside Cypht
+instead goes in a module set under `cypht/modules/`.
 
 ## Configuration reference
 
@@ -412,7 +430,7 @@ a form field.
 | `CYPHTWEBMAIL_CONTACTS_INSECURE` | `false` | skip TLS verification (self-signed certs) |
 | `CYPHTWEBMAIL_BRIDGE_URL` | auto | override when Dolibarr cannot reach itself by its public URL |
 
-**Never edit `vendor/jason-munro/cypht/.env` by hand** - Generate rewrites it.
+**No need to edit `vendor/jason-munro/cypht/.env` by hand** - Generate rewrites it.
 
 ## Troubleshooting
 
@@ -476,19 +494,6 @@ Useful upstream reading:
 - Handler/output base classes: `vendor/jason-munro/cypht/lib/modules.php`
 - Routing: `vendor/jason-munro/cypht/lib/dispatch.php`
 - Build: `vendor/jason-munro/cypht/scripts/config_gen.php`
-
-### Upstream patches
-
-Fixes that belong in Cypht rather than here go in `docs/upstream-patches/`
-with a PR description, and are applied at build time until merged. Keep that
-directory as close to empty as possible.
-
-### Before opening a PR
-
-- `php -l` every changed file
-- Press Generate and confirm the build completes
-- Load the webmail and exercise what you changed
-- If you touched the descriptor, deactivate and reactivate
 
 ### Testing checklist
 
