@@ -50,6 +50,7 @@ $options = array(
 	'group' => '',
 	'quiet' => false,
 	'permissions' => true,
+	'dolibarr' => '',
 );
 
 foreach (array_slice($argv, 1) as $arg) {
@@ -65,6 +66,10 @@ Modes
                         Run this before packaging or zipping the module.
 
 Options
+  --dolibarr=PATH       where Dolibarr lives, when this module sits outside
+                        its tree (symlinked custom dir, separate checkout).
+                        Accepts the htdocs folder, the install root, or
+                        master.inc.php itself. Found automatically otherwise.
   --owner=USER          chown writable paths afterwards (POSIX only)
   --group=GROUP         chgrp writable paths afterwards (POSIX only)
   --skip-permissions    do not touch ownership or modes
@@ -90,6 +95,8 @@ TEXT
 		$options['owner'] = substr($arg, 8);
 	} elseif (strpos($arg, '--group=') === 0) {
 		$options['group'] = substr($arg, 8);
+	} elseif (strpos($arg, '--dolibarr=') === 0) {
+		$options['dolibarr'] = substr($arg, 11);
 	} else {
 		fwrite(STDERR, "Unknown option: ".$arg."\nTry --help\n");
 		exit(1);
@@ -141,6 +148,38 @@ function cyphtFindComposer($root)
 }
 
 /**
+ * Resolve a user-supplied Dolibarr location to its master.inc.php.
+ *
+ * Accepts whichever of the three a person is likely to have to hand: the file
+ * itself, the htdocs folder holding it, or the install root above that.
+ *
+ * @param string $path
+ * @return string|null Absolute path to master.inc.php, or null if not there
+ */
+function cyphtResolveDolibarr($path)
+{
+	$path = rtrim($path, "/\\");
+	if ($path === '') {
+		return null;
+	}
+
+	$candidates = array(
+		$path,
+		$path.'/master.inc.php',
+		$path.'/htdocs/master.inc.php',
+	);
+
+	foreach ($candidates as $candidate) {
+		if (is_file($candidate) && basename($candidate) === 'master.inc.php') {
+			$real = realpath($candidate);
+			return ($real === false) ? $candidate : $real;
+		}
+	}
+
+	return null;
+}
+
+/**
  * @param string[] $cmd
  * @param string $cwd
  * @param bool $quiet
@@ -174,6 +213,24 @@ function cyphtRun(array $cmd, $cwd, $quiet)
 }
 
 /*
+ * Checked before any work starts: a typo here should fail in a second, not
+ * after composer and a full compile.
+ */
+$masterIncPath = '';
+
+if ($options['dolibarr'] !== '') {
+	$masterIncPath = cyphtResolveDolibarr($options['dolibarr']);
+	if ($masterIncPath === null) {
+		fwrite(STDERR, "No Dolibarr at: ".$options['dolibarr']."\n");
+		fwrite(STDERR, "Expected master.inc.php there, in htdocs/ below it, or that file itself.\n");
+		exit(1);
+	}
+	if ($options['mode'] === 'prepare') {
+		fwrite(STDERR, "--dolibarr is ignored with --prepare, which needs no Dolibarr.\n");
+	}
+}
+
+/*
  * Step 1: dependencies. Both modes need them.
  */
 $composer = cyphtFindComposer($root);
@@ -187,7 +244,13 @@ if ($composer === null) {
 	cyphtSay("Composer not found; using the vendor/ already on disk.\n", $options['quiet']);
 } else {
 	cyphtSay("== Dependencies ==\n", $options['quiet']);
-	$code = cyphtRun(array_merge($composer, array('install', '--no-interaction', '--no-progress')), $root, $options['quiet']);
+	// Composer reports progress on stderr, not stdout, so silencing our own
+	// output is not enough; it has to be told to be quiet itself.
+	$composerArgs = array('install', '--no-interaction', '--no-progress');
+	if ($options['quiet']) {
+		$composerArgs[] = '--quiet';
+	}
+	$code = cyphtRun(array_merge($composer, $composerArgs), $root, $options['quiet']);
 	if ($code !== 0) {
 		fwrite(STDERR, "composer install failed (exit ".$code.").\n");
 		exit(1);
@@ -241,26 +304,31 @@ if ($options['mode'] === 'prepare') {
  * Step 3: the full build. Dolibarr from here on, because the .env is written
  * from this installation's database credentials and stored secrets.
  */
-$bootstrap = array(
-	$root.'/../../master.inc.php',
-	$root.'/../../../master.inc.php',
-	$root.'/../../../htdocs/master.inc.php',
-);
+if ($masterIncPath === '') {
+	// Walk up from the module, which covers the normal custom/<module> layout.
+	$bootstrap = array(
+		$root.'/../../master.inc.php',
+		$root.'/../../../master.inc.php',
+		$root.'/../../../htdocs/master.inc.php',
+	);
 
-$loaded = false;
-foreach ($bootstrap as $candidate) {
-	if (is_file($candidate)) {
-		require_once $candidate;
-		$loaded = true;
-		break;
+	foreach ($bootstrap as $candidate) {
+		if (is_file($candidate)) {
+			$masterIncPath = $candidate;
+			break;
+		}
 	}
 }
 
-if (!$loaded) {
+if ($masterIncPath === '') {
 	fwrite(STDERR, "Could not find Dolibarr's master.inc.php from ".$root."\n");
-	fwrite(STDERR, "Run with --prepare to build everything that does not need Dolibarr.\n");
+	fwrite(STDERR, "Point at it with --dolibarr=/path/to/htdocs if this module sits\n");
+	fwrite(STDERR, "outside the Dolibarr tree, or use --prepare to build everything\n");
+	fwrite(STDERR, "that does not need Dolibarr.\n");
 	exit(1);
 }
+
+require_once $masterIncPath;
 
 require_once $root.'/class/webmail.class.php';
 
@@ -294,12 +362,17 @@ if (empty($result['success'])) {
  * write sessions, settings or a new build, and it fails far from the cause.
  */
 if ($options['permissions']) {
-	$writable = array(
+	// Directories get created when absent; the .env is a file the build has
+	// already written, so a missing one means something failed earlier. Never
+	// mkdir it: a directory named .env breaks every build after this one.
+	$writableDirs = array(
 		$webmail->getPublicPath(),
 		$webmail->getDataDir(),
 		$webmail->getDataDir().'/users',
 		$webmail->getDataDir().'/attachments',
 		$webmail->getDataDir().'/sso_sessions',
+	);
+	$writableFiles = array(
 		$webmail->getCyphtPath().'/.env',
 	);
 
@@ -310,15 +383,25 @@ if ($options['permissions']) {
 	}
 
 	$warnings = array();
+	$targets = array();
 
-	foreach ($writable as $target) {
-		if (!file_exists($target)) {
-			if (!@mkdir($target, 0770, true) && !is_dir($target)) {
-				$warnings[] = 'could not create '.$target;
-				continue;
-			}
+	foreach ($writableDirs as $target) {
+		if (!is_dir($target) && !@mkdir($target, 0770, true) && !is_dir($target)) {
+			$warnings[] = 'could not create '.$target;
+			continue;
 		}
+		$targets[] = $target;
+	}
 
+	foreach ($writableFiles as $target) {
+		if (!is_file($target)) {
+			$warnings[] = 'missing, skipped: '.$target;
+			continue;
+		}
+		$targets[] = $target;
+	}
+
+	foreach ($targets as $target) {
 		if (!@chmod($target, is_dir($target) ? 0770 : 0660)) {
 			$warnings[] = 'could not chmod '.$target;
 		}
@@ -330,7 +413,7 @@ if ($options['permissions']) {
 		}
 	}
 
-	cyphtSay("\nPermissions checked on ".count($writable)." paths.\n", $options['quiet']);
+	cyphtSay("\nPermissions checked on ".count($targets)." paths.\n", $options['quiet']);
 
 	foreach ($warnings as $message) {
 		fwrite(STDERR, "  warning: ".$message."\n");
