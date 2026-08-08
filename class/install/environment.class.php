@@ -16,7 +16,7 @@
  */
 
 require_once __DIR__ . '/../install/paths.class.php';
-require_once __DIR__ . '/../auth/sso.class.php';
+require_once __DIR__ . '/../auth/token.class.php';
 require_once __DIR__ . '/../integration/contactsource.class.php';
 
 /**
@@ -37,18 +37,18 @@ class CyphtEnvironment
 	private $paths;
 
 	/**
-	 * @var CyphtSso
+	 * @var CyphtToken
 	 */
-	private $sso;
+	private $token;
 
 	/**
 	 * @param CyphtPaths $paths
-	 * @param CyphtSso $sso
+	 * @param CyphtToken $token
 	 */
-	public function __construct(CyphtPaths $paths, CyphtSso $sso)
+	public function __construct(CyphtPaths $paths, CyphtToken $token)
 	{
 		$this->paths = $paths;
-		$this->sso = $sso;
+		$this->token = $token;
 	}
 
 	/**
@@ -104,9 +104,9 @@ class CyphtEnvironment
 			'CYPHT_MODULES'    => 'core,contacts,dolibarr_contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters,themes',
 			'DISABLE_FINGERPRINT' => 'true',
 			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
-			'SSO_SHARED_SECRET' => $this->sso->getOrCreateSsoSecret(),
+			'SSO_SHARED_SECRET' => $this->token->getOrCreateSsoSecret(),
 			// Encrypts the mailbox passwords inside the stored config.
-			'USER_CONFIG_SECRET' => $this->sso->getOrCreateConfigSecret(),
+			'USER_CONFIG_SECRET' => $this->token->getOrCreateConfigSecret(),
 			'SESSION_DEBUG'      => getDolGlobalString('CYPHTWEBMAIL_SESSION_DEBUG', 'false'),
 			'SESSION_TTL'        => getDolGlobalString('CYPHTWEBMAIL_SESSION_TTL', '604800'),
 			'SESSION_GC_DIVISOR' => getDolGlobalString('CYPHTWEBMAIL_SESSION_GC_DIVISOR', '200'),
