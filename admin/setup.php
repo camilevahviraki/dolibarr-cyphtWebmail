@@ -155,13 +155,36 @@ print '</td></tr>';
 
 print '</table>';
 
-print '<div class="center" style="margin-top: 10px;">';
-print '<form id="cypht-build-form">';
-print '<input type="hidden" name="token" value="'.$formToken.'">';
-print '<input type="hidden" name="action" value="build">';
-print '<button type="submit" class="button" data-loading-text="'.$langs->trans("CyphtWebmailBuilding").'">'.$langs->trans("CyphtWebmailGenerateButton").'</button>';
-print '</form>';
-print '</div>';
+$requirements = $manager->checkBuildRequirements();
+
+if (!$requirements['ok']) {
+	print '<div class="warning" style="padding: 12px; margin-top: 10px;">';
+	print '<strong>'.$langs->trans("CyphtWebmailCannotBuildHere").'</strong><br><br>';
+
+	print '<table class="nobordernopadding">';
+	foreach ($requirements['checks'] as $check) {
+		print '<tr><td style="padding-right: 10px;">';
+		print $check['ok'] ? img_picto('', 'tick') : img_picto('', 'error');
+		print '</td><td style="padding-right: 10px;">'.dol_escape_htmltag($check['label']).'</td>';
+		print '<td class="opacitymedium">'.dol_escape_htmltag($check['detail']).'</td></tr>';
+	}
+	print '</table><br>';
+
+	print $langs->trans("CyphtWebmailBuildFromShell").'<br>';
+	print '<pre style="margin-top: 8px; padding: 8px; background: #f4f4f4; overflow-x: auto;">';
+	print 'cd '.dol_escape_htmltag($manager->getModuleRoot())."\n";
+	print 'php scripts/build.php';
+	print '</pre>';
+	print '</div>';
+} else {
+	print '<div class="center" style="margin-top: 10px;">';
+	print '<form id="cypht-build-form">';
+	print '<input type="hidden" name="token" value="'.$formToken.'">';
+	print '<input type="hidden" name="action" value="build">';
+	print '<button type="submit" class="button" data-loading-text="'.$langs->trans("CyphtWebmailBuilding").'">'.$langs->trans("CyphtWebmailGenerateButton").'</button>';
+	print '</form>';
+	print '</div>';
+}
 
 // 'out' = real child-process output, 'err' = our own failure messages,
 // 'info' = our own step/status lines. Stderr is not colored red just for
