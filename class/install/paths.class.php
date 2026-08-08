@@ -177,7 +177,7 @@ class CyphtPaths
 	 */
 	public function getUserSettingsPath($login)
 	{
-		$dir = $this->paths->getDataDir() . '/users';
+		$dir = $this->getDataDir() . '/users';
 		$safe = substr(preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $login), 0, 64);
 		$fingerprint = substr(hash('sha256', (string) $login), 0, 12);
 
@@ -193,7 +193,7 @@ class CyphtPaths
 	 */
 	public function getLegacyUserSettingsPath($login)
 	{
-		$dir = $this->paths->getDataDir() . '/users';
+		$dir = $this->getDataDir() . '/users';
 
 		return $dir . '/' . preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $login) . '.json';
 	}
