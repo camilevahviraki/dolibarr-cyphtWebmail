@@ -79,32 +79,124 @@ class CyphtVendorBridge
 			return false;
 		}
 
-		// Same flat-dependency problem as autoload.php above, but for raw
-		// asset directories (Bootstrap, Bootswatch) that config_gen.php
-		// reads directly off disk. Symlink if the filesystem allows it,
-		// otherwise fall back to a recursive copy. Torn down and
-		// recreated every build so neither can go stale unnoticed.
+		// Same flat-dependency problem as autoload.php above, but for the raw
+		// asset directories (Bootstrap, Bootswatch) config_gen.php reads off
+		// disk. Rebuilt only when the installed versions change: copying them
+		// takes minutes and overruns the request.
 		$moduleVendor = $this->paths->getModuleRoot() . '/vendor';
 		foreach (array('twbs', 'thomaspark') as $vendor) {
 			$target = $moduleVendor . '/' . $vendor;
 			$link = $bridgeDir . '/' . $vendor;
+			$marker = $bridgeDir . '/.' . $vendor . '.bridged';
 
 			if (!is_dir($target)) {
 				continue; // not installed, nothing to bridge
 			}
 
-			if (is_link($link)) {
-				@unlink($link);
-			} elseif (is_dir($link)) {
-				$this->deleteRecursive($link);
+			$fingerprint = $this->bridgeFingerprint($vendor);
+			if ($fingerprint !== '' && is_dir($link) && @file_get_contents($marker) === $fingerprint) {
+				continue; // already bridged at this exact version
 			}
 
-			if (!@symlink($target, $link)) {
+			$this->unbridge($link);
+
+			$linked = @symlink($target, $link);
+			if (!$linked) {
+				$linked = $this->makeJunction($target, $link);
+			}
+			if (!$linked) {
 				$this->copyRecursive($target, $link);
 			}
+
+			@file_put_contents($marker, $fingerprint);
 		}
 
 		return true;
+	}
+
+	/**
+	 * Hash of the installed versions under a vendor namespace, so the bridge
+	 * is only rebuilt when composer actually moves one of them.
+	 *
+	 * @param string $vendor Composer vendor namespace
+	 * @return string
+	 */
+	private function bridgeFingerprint($vendor)
+	{
+		$installedJson = $this->paths->getModuleRoot() . '/vendor/composer/installed.json';
+		if (!file_exists($installedJson)) {
+			return '';
+		}
+
+		$data = json_decode(file_get_contents($installedJson), true);
+		if (!is_array($data)) {
+			return '';
+		}
+		$packages = isset($data['packages']) ? $data['packages'] : $data;
+
+		$parts = array();
+		foreach ($packages as $pkg) {
+			if (!empty($pkg['name']) && strpos($pkg['name'], $vendor . '/') === 0) {
+				$parts[] = $pkg['name'] . '@' . (isset($pkg['version']) ? $pkg['version'] : '?');
+			}
+		}
+		if (count($parts) === 0) {
+			return '';
+		}
+		sort($parts);
+
+		return md5(implode(',', $parts));
+	}
+
+	/**
+	 * Remove an existing bridge entry.
+	 *
+	 * rmdir() is tried before deleteRecursive() because a Windows junction
+	 * looks like a directory to is_dir() and PHP does not reliably report it
+	 * via is_link(); rmdir() removes the junction and leaves its target
+	 * alone, while deleteRecursive() would follow it and delete the real
+	 * Bootstrap files.
+	 *
+	 * @param string $link
+	 * @return void
+	 */
+	private function unbridge($link)
+	{
+		if (is_link($link)) {
+			if (!@unlink($link)) {
+				@rmdir($link);
+			}
+			return;
+		}
+
+		if (is_dir($link)) {
+			if (!@rmdir($link)) {
+				$this->deleteRecursive($link);
+			}
+		}
+	}
+
+	/**
+	 * Windows directory junction, which unlike a symlink needs no elevation.
+	 *
+	 * @param string $target
+	 * @param string $link
+	 * @return bool
+	 */
+	private function makeJunction($target, $link)
+	{
+		if (DIRECTORY_SEPARATOR !== '\\' || !function_exists('exec')) {
+			return false;
+		}
+
+		$cmd = 'mklink /J ' . escapeshellarg(str_replace('/', '\\', $link)) .
+			' ' . escapeshellarg(str_replace('/', '\\', $target));
+
+		$output = array();
+		$code = 1;
+		@exec('cmd /c ' . $cmd . ' 2>&1', $output, $code);
+
+		return $code === 0 && is_dir($link);
 	}
 
 	/**

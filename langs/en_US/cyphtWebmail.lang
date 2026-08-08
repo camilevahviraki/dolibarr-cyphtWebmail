@@ -63,3 +63,14 @@ MyPageName = My page name
 #
 MyWidget = My widget
 MyWidgetDescription = My widget description
+
+# Left menu (see core/modules/modcyphtWebmail.class.php)
+CyphtMenuWebmail=Webmail
+CyphtMenuOpenTickets=Open tickets
+CyphtMenuOverdueInvoices=Overdue invoices
+CyphtMenuTodayAgenda=Agenda
+CyphtMenuEmailCollector=Email collector
+CyphtMenuEmailTemplates=Email templates
+CyphtMenuMassEmailing=Mass emailing
+CyphtMenuModuleSetup=Module setup
+

@@ -17,6 +17,7 @@
 
 require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
 require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
+require_once __DIR__ . '/../contacts/cyphtcontactsbridge.class.php';
 
 /**
  * \file        class/env/cyphtenvconfig.class.php
@@ -60,20 +61,33 @@ class CyphtEnvConfig
 	 */
 	public function buildEnvOverrides()
 	{
+		global $conf;
+
 		$dataDir = $this->paths->getDataDir();
 
+		// Cypht stores per-user settings in Dolibarr's own database. Taken from
+		// $conf->db, which is already decrypted when the password is encrypted
+		// in conf.php.
+		$dbType = (isset($conf->db->type) && $conf->db->type === 'pgsql') ? 'pgsql' : 'mysql';
+
 		return array(
+			'DB_CONNECTION_TYPE' => 'host',
+			'DB_DRIVER'          => $dbType,
+			'DB_HOST'            => (isset($conf->db->host) ? $conf->db->host : '127.0.0.1'),
+			'DB_PORT'            => (isset($conf->db->port) ? $conf->db->port : ''),
+			'DB_NAME'            => (isset($conf->db->name) ? $conf->db->name : ''),
+			'DB_USER'            => (isset($conf->db->user) ? $conf->db->user : ''),
+			'DB_PASS'            => (isset($conf->db->pass) ? $conf->db->pass : ''),
+			// Configurable in conf.php, so never assumed to be llx_.
+			'DOLIBARR_DB_PREFIX' => (defined('MAIN_DB_PREFIX') ? MAIN_DB_PREFIX : 'llx_'),
 			'SESSION_TYPE'     => 'custom',
 			'AUTH_TYPE'        => 'custom',
 			'IMAP_AUTH_NAME'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_NAME', 'Webmail'),
 			'IMAP_AUTH_SERVER' => getDolGlobalString('CYPHTWEBMAIL_IMAP_SERVER', 'localhost'),
 			'IMAP_AUTH_PORT'   => getDolGlobalString('CYPHTWEBMAIL_IMAP_PORT', '993'),
 			'IMAP_AUTH_TLS'    => getDolGlobalString('CYPHTWEBMAIL_IMAP_TLS', 'true'),
-			// Not 'file': Hm_User_Config_File encrypts settings using the
-			// "password" as the key, but our SSO password is a fresh
-			// per-request token, so nothing would ever decrypt again.
-			// Custom_User_Config (see CyphtSsoBridge) stores unencrypted
-			// instead, same fix Tiki uses (Tiki_Hm_User_Config).
+			// Not 'file': Hm_User_Config_File keys its encryption on the login
+			// password, which under SSO is a fresh token every request.
 			'USER_CONFIG_TYPE' => 'custom:Custom_User_Config',
 			'USER_SETTINGS_DIR' => $dataDir . '/users',
 			'ATTACHMENT_DIR'   => $dataDir . '/attachments',
@@ -84,11 +98,25 @@ class CyphtEnvConfig
 			// "account" is where users add their IMAP mailbox after SSO.
 			// "api_login" is what performSsoLogin() calls. "themes" serves
 			// the Bootswatch CSS packs; without it the app renders unstyled.
-			'CYPHT_MODULES'    => 'core,contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters,themes',
+			// dolibarr_contacts must appear here or config_gen.php never scans
+			// its setup.php, and it must follow "contacts", whose load_contacts
+			// handler it attaches to.
+			'CYPHT_MODULES'    => 'core,contacts,dolibarr_contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters,themes',
 			'DISABLE_FINGERPRINT' => 'true',
 			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
 			'SSO_SHARED_SECRET' => $this->sso->getOrCreateSsoSecret(),
+			// Encrypts the mailbox passwords inside the stored config.
+			'USER_CONFIG_SECRET' => $this->sso->getOrCreateConfigSecret(),
+			'SESSION_DEBUG'      => getDolGlobalString('CYPHTWEBMAIL_SESSION_DEBUG', 'false'),
+			'SESSION_TTL'        => getDolGlobalString('CYPHTWEBMAIL_SESSION_TTL', '604800'),
+			'SESSION_GC_DIVISOR' => getDolGlobalString('CYPHTWEBMAIL_SESSION_GC_DIVISOR', '200'),
 			'DISABLE_OPEN_BASE_DIR' => 'true',
+			'DOLIBARR_CONTACTS_URL' => CyphtContactsBridge::resolveBridgeUrl(),
+			'DOLIBARR_CONTACTS_TTL' => getDolGlobalString('CYPHTWEBMAIL_CONTACTS_TTL', '300'),
+			'DOLIBARR_CONTACTS_TIMEOUT' => getDolGlobalString('CYPHTWEBMAIL_CONTACTS_TIMEOUT', '5'),
+			'DOLIBARR_CONTACTS_INSECURE' => getDolGlobalString('CYPHTWEBMAIL_CONTACTS_INSECURE', 'false'),
+			// Opened with target="_top" so it escapes the webmail iframe.
+			'DOLIBARR_NEW_CONTACT_URL' => dol_buildpath('/contact/card.php', 2) . '?action=create',
 		);
 	}
 

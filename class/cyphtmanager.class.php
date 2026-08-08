@@ -18,22 +18,17 @@
 /**
  * \file        class/cyphtmanager.class.php
  * \ingroup     cyphtWebmail
- * \brief       Entry point / thin facade over the Dolibarr<->Cypht glue
- *              code. This class used to hold all of that logic directly
- *              and had grown too long, so it has been split into six
- *              focused collaborators, one per subfolder of class/:
+ * \brief       Facade over the Dolibarr<->Cypht glue code. Delegates to one
+ *              collaborator per subfolder of class/:
  *
- *   class/state/cyphtinstallstate.class.php    CyphtInstallState    paths, installed/built version bookkeeping
- *   class/env/cyphtenvconfig.class.php         CyphtEnvConfig       .env overrides, writing .env
- *   class/vendor/cyphtvendorbridge.class.php   CyphtVendorBridge    flat-composer-dependency vendor/ bridge, recursive copy/delete
- *   class/sso/cyphtssobridge.class.php         CyphtSsoBridge       Dolibarr SSO token + Custom_Auth/Custom_Session override + functional login
- *   class/upstream/cyphtupstreampatcher.class.php  CyphtUpstreamPatcher  patches an upstream Cypht double-require bug
- *   class/build/cyphtbuildpipeline.class.php   CyphtBuildPipeline   orchestrates composer install + config_gen.php + publish
- *
- * Every caller (admin/setup.php, admin/build/build.php,
- * admin/build/build_cancel.php, cyphtWebmailindex.php) keeps calling
- * "new CyphtManager($db)" and the same public methods exactly as before -
- * this class just delegates to the pieces above.
+ *   class/state/cyphtinstallstate.class.php        CyphtInstallState     paths, installed/built version bookkeeping
+ *   class/env/cyphtenvconfig.class.php             CyphtEnvConfig        .env overrides, writing .env
+ *   class/vendor/cyphtvendorbridge.class.php       CyphtVendorBridge     flat-composer-dependency vendor/ bridge, recursive copy/delete
+ *   class/sso/cyphtssobridge.class.php             CyphtSsoBridge        SSO secrets, tokens, functional login
+ *   class/cypht/cyphtmoduleinstaller.class.php     CyphtModuleInstaller  installs cypht/modules/* into the vendored Cypht
+ *   class/contacts/cyphtcontactsbridge.class.php   CyphtContactsBridge   contacts bridge URL resolution
+ *   class/upstream/cyphtupstreampatcher.class.php  CyphtUpstreamPatcher  patches upstream Cypht gaps
+ *   class/build/cyphtbuildpipeline.class.php       CyphtBuildPipeline    composer install + config_gen.php + publish
  */
 
 require_once __DIR__ . '/state/cyphtinstallstate.class.php';
@@ -41,6 +36,8 @@ require_once __DIR__ . '/env/cyphtenvconfig.class.php';
 require_once __DIR__ . '/vendor/cyphtvendorbridge.class.php';
 require_once __DIR__ . '/sso/cyphtssobridge.class.php';
 require_once __DIR__ . '/upstream/cyphtupstreampatcher.class.php';
+require_once __DIR__ . '/contacts/cyphtcontactsbridge.class.php';
+require_once __DIR__ . '/cypht/cyphtmoduleinstaller.class.php';
 require_once __DIR__ . '/build/cyphtbuildpipeline.class.php';
 
 class CyphtManager
@@ -81,6 +78,11 @@ class CyphtManager
 	private $upstreamPatcher;
 
 	/**
+	 * @var CyphtModuleInstaller
+	 */
+	private $moduleInstaller;
+
+	/**
 	 * @var CyphtBuildPipeline
 	 */
 	private $buildPipeline;
@@ -97,14 +99,36 @@ class CyphtManager
 		$this->envConfig = new CyphtEnvConfig($this->paths, $this->sso);
 		$this->vendorBridge = new CyphtVendorBridge($this->paths);
 		$this->upstreamPatcher = new CyphtUpstreamPatcher($this->paths);
+		$this->moduleInstaller = new CyphtModuleInstaller($this->paths);
 		$this->buildPipeline = new CyphtBuildPipeline(
 			$db,
 			$this->paths,
 			$this->envConfig,
 			$this->vendorBridge,
 			$this->sso,
-			$this->upstreamPatcher
+			$this->upstreamPatcher,
+			$this->moduleInstaller
 		);
+	}
+
+	/**
+	 * Settings path for a user, used by the USER_DELETE trigger.
+	 *
+	 * @param string $login Dolibarr login
+	 * @return string
+	 */
+	public function getUserSettingsPath($login)
+	{
+		return $this->sso->getUserSettingsPath($login);
+	}
+
+	/**
+	 * @param string $login Dolibarr login
+	 * @return string
+	 */
+	public function getLegacyUserSettingsPath($login)
+	{
+		return $this->sso->getLegacyUserSettingsPath($login);
 	}
 
 	// ---- CyphtInstallState ----

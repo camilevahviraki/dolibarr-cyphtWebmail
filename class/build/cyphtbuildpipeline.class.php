@@ -20,6 +20,7 @@ require_once __DIR__ . '/../env/cyphtenvconfig.class.php';
 require_once __DIR__ . '/../vendor/cyphtvendorbridge.class.php';
 require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
 require_once __DIR__ . '/../upstream/cyphtupstreampatcher.class.php';
+require_once __DIR__ . '/../cypht/cyphtmoduleinstaller.class.php';
 
 /**
  * \file        class/build/cyphtbuildpipeline.class.php
@@ -67,12 +68,18 @@ class CyphtBuildPipeline
 	private $upstreamPatcher;
 
 	/**
+	 * @var CyphtModuleInstaller
+	 */
+	private $moduleInstaller;
+
+	/**
 	 * @param DoliDB $db
 	 * @param CyphtInstallState $paths
 	 * @param CyphtEnvConfig $envConfig
 	 * @param CyphtVendorBridge $vendorBridge
 	 * @param CyphtSsoBridge $sso
 	 * @param CyphtUpstreamPatcher $upstreamPatcher
+	 * @param CyphtModuleInstaller $moduleInstaller
 	 */
 	public function __construct(
 		$db,
@@ -80,7 +87,8 @@ class CyphtBuildPipeline
 		CyphtEnvConfig $envConfig,
 		CyphtVendorBridge $vendorBridge,
 		CyphtSsoBridge $sso,
-		CyphtUpstreamPatcher $upstreamPatcher
+		CyphtUpstreamPatcher $upstreamPatcher,
+		CyphtModuleInstaller $moduleInstaller
 	) {
 		$this->db = $db;
 		$this->paths = $paths;
@@ -88,6 +96,7 @@ class CyphtBuildPipeline
 		$this->vendorBridge = $vendorBridge;
 		$this->sso = $sso;
 		$this->upstreamPatcher = $upstreamPatcher;
+		$this->moduleInstaller = $moduleInstaller;
 	}
 
 	/**
@@ -552,6 +561,14 @@ class CyphtBuildPipeline
 		$this->debugLog('=== runConfigGen() starting ===');
 		$this->debugLog('PHP version: ' . phpversion() . ', OS: ' . PHP_OS . ', SAPI: ' . php_sapi_name());
 
+		// A build is minutes of work in one request. Without these two, PHP's
+		// execution limit or the user closing the tab kills it mid-pipeline,
+		// which is how builds ended up dying after the SSO override with no
+		// error logged and a lock file left behind (the kill skips the
+		// finally block below).
+		@set_time_limit(0);
+		@ignore_user_abort(true);
+
 		$lockFile = $this->getLockFilePath();
 
 		if (file_exists($lockFile)) {
@@ -563,9 +580,13 @@ class CyphtBuildPipeline
 					'success' => false,
 					'output' => '',
 					'error' => 'A build is already running (started ' . $age . 's ago). ' .
-						'Wait for it to finish rather than clicking Generate again.',
+						'Wait for it to finish rather than clicking Generate again. ' .
+						'If no build is actually running, this is a leftover lock from a ' .
+						'crashed build; it is ignored automatically after ' . (420 - $age) . 's, ' .
+						'or delete: ' . $lockFile,
 				);
 			}
+			$this->debugLog('Ignoring stale build.lock (' . $age . 's old, previous build crashed or was killed)');
 		}
 
 		// Clear a stale cancel flag so it doesn't cancel this new build immediately.
@@ -677,12 +698,14 @@ class CyphtBuildPipeline
 		}
 		$emit("vendor/ bridge shim in place (Cypht installed as a flat dependency, see comment in the file).\n");
 
-		if (!$this->sso->writeSiteAuthOverride()) {
-			$this->error = $this->sso->error;
+		// Before config_gen.php: it scans modules/<name>/setup.php for every
+		// module in CYPHT_MODULES, so the files must be on disk by then.
+		if (!$this->moduleInstaller->installAll()) {
+			$this->error = $this->moduleInstaller->error;
 			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
-		$emit("Dolibarr SSO auth override written to modules/site/lib.php.\n");
+		$emit("Cypht module sets installed: " . implode(', ', $this->moduleInstaller->listModuleSets()) . ".\n");
 
 		if (!$this->upstreamPatcher->patchCoreFunctionsGuard()) {
 			$this->error = $this->upstreamPatcher->error;

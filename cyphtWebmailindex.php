@@ -56,6 +56,15 @@ if (!isModEnabled('cyphtwebmail')) {
 
 $manager = new CyphtManager($db);
 
+// Current Cypht page, carried in one opaque parameter holding Cypht's own
+// query string. Nested rather than mirrored because Cypht uses page/id/uid
+// and Dolibarr uses action/id/token: merging the namespaces collides on "id".
+// Whitelisted here because it ends up in an iframe src.
+$cyphtQuery = GETPOST('cypht', 'none');
+if (!is_string($cyphtQuery) || !preg_match('/^[A-Za-z0-9_\-\.=&%+]{0,300}$/', $cyphtQuery)) {
+	$cyphtQuery = '';
+}
+
 // Must happen before any HTML output (llxHeader() included): SSO login
 // sets Cypht's hm_id/hm_session cookies via setcookie(), which silently
 // fails once headers have already been sent.
@@ -81,9 +90,18 @@ if (!$manager->isPublished()) {
 		// blocking access to the page entirely.
 		print '<div class="warning" style="padding: 15px;">'.dol_escape_htmltag($manager->error).'</div>';
 	}
-	print '<iframe src="'.dol_escape_htmltag($publicUrl).'" '.
+	// SSO is still passed the bare $publicUrl: it parses it for the cookie
+	// domain/path, where a query string has no place.
+	$frameUrl = $publicUrl.($cyphtQuery !== '' ? '?'.$cyphtQuery : '');
+
+	print '<iframe id="cyphtwebmail-frame" src="'.dol_escape_htmltag($frameUrl).'" '.
 		'style="width:100%; height: calc(100vh - 220px); min-height: 500px; border: none;" '.
 		'title="Cypht Webmail"></iframe>';
+
+	$syncScript = dol_buildpath('/cyphtWebmail/js/cypht-url-sync.js', 1);
+	$syncVersion = @filemtime(__DIR__.'/js/cypht-url-sync.js');
+
+	print '<script src="'.dol_escape_htmltag($syncScript.($syncVersion ? '?v='.$syncVersion : '')).'"></script>';
 }
 
 llxFooter();
