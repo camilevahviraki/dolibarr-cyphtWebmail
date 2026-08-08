@@ -68,9 +68,11 @@ class CyphtPaths
 	}
 
 	/**
-	 * Dolibarr-managed data directory for this module (outside web root,
-	 * created at module activation via $this->dirs in the descriptor).
-	 * Ensures the "users" and "attachments" subfolders Cypht needs exist.
+	 * Dolibarr-managed data directory for this module, outside the web root.
+	 * Ensures the users/ and attachments/ subfolders Cypht needs exist.
+	 *
+	 * Unlike getModuleRoot() and getCyphtPath(), this needs Dolibarr loaded.
+	 * scripts/build.php --prepare runs without it and must never reach here.
 	 *
 	 * @return string
 	 */
@@ -160,5 +162,39 @@ class CyphtPaths
 	public function isPublished()
 	{
 		return file_exists($this->getPublicPath() . '/index.php');
+	}
+	/**
+	 * Filesystem path of a user's Cypht settings file.
+	 *
+	 * MUST stay in step with Custom_User_Config::get_path() in the generated
+	 * modules/site/lib.php: Cypht writes the file, Dolibarr deletes it, and
+	 * neither can see the other's code. The readable prefix is cosmetic; the
+	 * sha256 fragment is what keeps two logins that sanitise identically
+	 * ("jean dupont" and "jean_dupont") from sharing one file.
+	 *
+	 * @param string $login Dolibarr login
+	 * @return string
+	 */
+	public function getUserSettingsPath($login)
+	{
+		$dir = $this->paths->getDataDir() . '/users';
+		$safe = substr(preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $login), 0, 64);
+		$fingerprint = substr(hash('sha256', (string) $login), 0, 12);
+
+		return $dir . '/' . $safe . '-' . $fingerprint . '.json';
+	}
+
+	/**
+	 * Pre-collision-fix filename, still cleaned up on user deletion so an
+	 * upgrade does not strand an old file holding mailbox credentials.
+	 *
+	 * @param string $login Dolibarr login
+	 * @return string
+	 */
+	public function getLegacyUserSettingsPath($login)
+	{
+		$dir = $this->paths->getDataDir() . '/users';
+
+		return $dir . '/' . preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $login) . '.json';
 	}
 }
