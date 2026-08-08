@@ -59,6 +59,10 @@ class CyphtToken
 			return $secret;
 		}
 
+		// Not loaded by master.inc.php, so a first command line build would
+		// otherwise die here rather than minting the secret.
+		require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
+
 		$secret = bin2hex(random_bytes(32));
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_SSO_SECRET', $secret, 'chaine', 0, '', $conf->entity);
 
@@ -83,6 +87,8 @@ class CyphtToken
 		if ($secret !== '') {
 			return $secret;
 		}
+
+		require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
 
 		$secret = bin2hex(random_bytes(32));
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_CONFIG_SECRET', $secret, 'chaine', 0, '', $conf->entity);
