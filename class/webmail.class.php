@@ -24,7 +24,8 @@
  *   class/install/paths.class.php        CyphtPaths     paths, installed/built version bookkeeping
  *   class/install/environment.class.php             CyphtEnvironment        .env overrides, writing .env
  *   class/install/vendorlayout.class.php       CyphtVendorLayout     flat-composer-dependency vendor/ bridge, recursive copy/delete
- *   class/auth/sso.class.php             CyphtSso        SSO secrets, tokens, functional login
+ *   class/auth/token.class.php                     CyphtToken            shared secrets and HMAC assertions
+ *   class/auth/login.class.php                     CyphtLogin            functional login into Cypht
  *   class/install/moduleinstaller.class.php     CyphtModuleInstaller  installs cypht/modules/* into the vendored Cypht
  *   class/integration/contactsource.class.php   CyphtContactSource   contacts bridge URL resolution
  *   class/install/upstreampatches.class.php  CyphtUpstreamPatches  patches upstream Cypht gaps
@@ -34,7 +35,8 @@
 require_once __DIR__ . '/install/paths.class.php';
 require_once __DIR__ . '/install/environment.class.php';
 require_once __DIR__ . '/install/vendorlayout.class.php';
-require_once __DIR__ . '/auth/sso.class.php';
+require_once __DIR__ . '/auth/token.class.php';
+require_once __DIR__ . '/auth/login.class.php';
 require_once __DIR__ . '/install/upstreampatches.class.php';
 require_once __DIR__ . '/integration/contactsource.class.php';
 require_once __DIR__ . '/install/moduleinstaller.class.php';
@@ -68,9 +70,14 @@ class CyphtWebmail
 	private $vendorBridge;
 
 	/**
-	 * @var CyphtSso
+	 * @var CyphtToken
 	 */
-	private $sso;
+	private $token;
+
+	/**
+	 * @var CyphtLogin
+	 */
+	private $login;
 
 	/**
 	 * @var CyphtUpstreamPatches
@@ -95,8 +102,9 @@ class CyphtWebmail
 		$this->db = $db;
 
 		$this->paths = new CyphtPaths();
-		$this->sso = new CyphtSso($db, $this->paths);
-		$this->envConfig = new CyphtEnvironment($this->paths, $this->sso);
+		$this->token = new CyphtToken($db);
+		$this->login = new CyphtLogin($this->paths, $this->token);
+		$this->envConfig = new CyphtEnvironment($this->paths, $this->token);
 		$this->vendorBridge = new CyphtVendorLayout($this->paths);
 		$this->upstreamPatcher = new CyphtUpstreamPatches($this->paths);
 		$this->moduleInstaller = new CyphtModuleInstaller($this->paths);
@@ -105,7 +113,7 @@ class CyphtWebmail
 			$this->paths,
 			$this->envConfig,
 			$this->vendorBridge,
-			$this->sso,
+			$this->login,
 			$this->upstreamPatcher,
 			$this->moduleInstaller
 		);
@@ -119,7 +127,7 @@ class CyphtWebmail
 	 */
 	public function getUserSettingsPath($login)
 	{
-		return $this->sso->getUserSettingsPath($login);
+		return $this->paths->getUserSettingsPath($login);
 	}
 
 	/**
@@ -128,7 +136,7 @@ class CyphtWebmail
 	 */
 	public function getLegacyUserSettingsPath($login)
 	{
-		return $this->sso->getLegacyUserSettingsPath($login);
+		return $this->paths->getLegacyUserSettingsPath($login);
 	}
 
 	// ---- CyphtPaths ----
@@ -212,12 +220,12 @@ class CyphtWebmail
 		return $result;
 	}
 
-	// ---- CyphtSso ----
+	// ---- Auth ----
 
 	/** @return string */
 	public function getOrCreateSsoSecret()
 	{
-		return $this->sso->getOrCreateSsoSecret();
+		return $this->token->getOrCreateSsoSecret();
 	}
 
 	/**
@@ -226,7 +234,7 @@ class CyphtWebmail
 	 */
 	public function generateSsoLoginToken($login)
 	{
-		return $this->sso->generateSsoLoginToken($login);
+		return $this->token->generateSsoLoginToken($login);
 	}
 
 	/**
@@ -236,8 +244,8 @@ class CyphtWebmail
 	 */
 	public function performSsoLogin($login, $cyphtUrl)
 	{
-		$result = $this->sso->performSsoLogin($login, $cyphtUrl);
-		$this->error = $this->sso->error;
+		$result = $this->login->performSsoLogin($login, $cyphtUrl);
+		$this->error = $this->login->error;
 		return $result;
 	}
 
@@ -249,6 +257,14 @@ class CyphtWebmail
 		$result = $this->buildPipeline->publishSite();
 		$this->error = $this->buildPipeline->error;
 		return $result;
+	}
+
+	/**
+	 * @return array{ok:bool,checks:array}
+	 */
+	public function checkBuildRequirements()
+	{
+		return $this->buildPipeline->checkBuildRequirements();
 	}
 
 	/** @return array{success:bool,message:string} */
