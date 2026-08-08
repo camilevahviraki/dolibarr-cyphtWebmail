@@ -804,6 +804,11 @@ class CyphtPipeline
 		}
 		$emit(sprintf("[copy finished in %.1fs]\n", microtime(true) - $stepStart));
 
+		// main.inc.php pulls admin.lib.php in for us; master.inc.php, which is
+		// all a command line build loads, does not. Ask for it here so the
+		// build does not die on the last line after doing all the work.
+		require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
+
 		$version = $this->paths->getInstalledVersion();
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_LAST_BUILD', dol_now(), 'chaine', 0, '', $conf->entity);
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_BUILT_VERSION', $version, 'chaine', 0, '', $conf->entity);
