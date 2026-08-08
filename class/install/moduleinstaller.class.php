@@ -15,10 +15,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
 
 /**
- * \file        class/cypht/cyphtmoduleinstaller.class.php
+ * \file        class/install/moduleinstaller.class.php
  * \ingroup     cyphtWebmail
  * \brief       Installs this module's Cypht module sets into the vendored
  *              Cypht application.
@@ -43,14 +43,14 @@ class CyphtModuleInstaller
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @param CyphtInstallState $paths
+	 * @param CyphtPaths $paths
 	 */
-	public function __construct(CyphtInstallState $paths)
+	public function __construct(CyphtPaths $paths)
 	{
 		$this->paths = $paths;
 	}

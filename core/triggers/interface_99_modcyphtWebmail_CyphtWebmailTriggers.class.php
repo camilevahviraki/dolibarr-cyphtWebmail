@@ -19,7 +19,7 @@
  * \file        core/triggers/interface_99_modcyphtWebmail_CyphtWebmailTriggers.class.php
  */
 require_once DOL_DOCUMENT_ROOT.'/core/triggers/dolibarrtriggers.class.php';
-require_once __DIR__.'/../../class/cyphtmanager.class.php';
+require_once __DIR__.'/../../class/webmail.class.php';
 
 class InterfaceCyphtWebmailTriggers extends DolibarrTriggers
 {
@@ -77,7 +77,7 @@ class InterfaceCyphtWebmailTriggers extends DolibarrTriggers
 			return 0;
 		}
 
-		$manager = new CyphtManager($this->db);
+		$manager = new CyphtWebmail($this->db);
 
 		$paths = array(
 			$manager->getUserSettingsPath($login),
@@ -120,7 +120,7 @@ class InterfaceCyphtWebmailTriggers extends DolibarrTriggers
 			return 0;
 		}
 
-		$manager = new CyphtManager($this->db);
+		$manager = new CyphtWebmail($this->db);
 		$target = $manager->getUserSettingsPath($to);
 
 		if (file_exists($target)) {

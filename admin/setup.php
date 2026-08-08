@@ -19,7 +19,7 @@
  * \file        admin/setup.php
  * \ingroup     cyphtWebmail
  * \brief       Setup page: IMAP settings + the "Generate / Rebuild" button
- *              that runs Cypht's config_gen.php through CyphtManager.
+ *              that runs Cypht's config_gen.php through CyphtWebmail.
  */
 
 // Load Dolibarr environment
@@ -44,7 +44,7 @@ if (!$res) {
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
-require_once __DIR__.'/../class/cyphtmanager.class.php';
+require_once __DIR__.'/../class/webmail.class.php';
 
 global $conf, $db, $langs, $user;
 
@@ -55,7 +55,7 @@ if (!$user->admin) {
 $langs->loadLangs(array("admin", "cyphtWebmail@cyphtWebmail"));
 
 $action = GETPOST('action', 'aZ09');
-$manager = new CyphtManager($db);
+$manager = new CyphtWebmail($db);
 $buildResult = null;
 
 if ($action == 'update_settings') {
@@ -69,7 +69,7 @@ if ($action == 'update_settings') {
 }
 
 $form = new Form($db);
-$manager = new CyphtManager($db);
+$manager = new CyphtWebmail($db);
 // Computed once and reused for every form/JS call on this page.
 $formToken = newToken();
 
@@ -165,7 +165,7 @@ print '</div>';
 
 // 'out' = real child-process output, 'err' = our own failure messages,
 // 'info' = our own step/status lines. Stderr is not colored red just for
-// being stderr; see CyphtBuildPipeline::runProcess().
+// being stderr; see CyphtPipeline::runProcess().
 print '<style>
 #cyphtwebmail-log .log-out { color: #d4d4d4; }
 #cyphtwebmail-log .log-err { color: #f14c4c; }

@@ -155,7 +155,7 @@ and module setup. It deliberately does not repeat Cypht's own navigation.
 ## How it works
 
 ```
-Dolibarr page (cyphtWebmailindex.php)
+Dolibarr page (index.php)
   │  performSsoLogin()  ── HMAC token ──▶  Cypht cypht_login()
   │
   └─ <iframe> ──▶ public/index.php  (the built Cypht app)

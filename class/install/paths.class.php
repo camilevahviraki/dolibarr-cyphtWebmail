@@ -16,12 +16,12 @@
  */
 
 /**
- * \file        class/state/cyphtinstallstate.class.php
+ * \file        class/install/paths.class.php
  * \ingroup     cyphtWebmail
  * \brief       Path resolution and installed/built-version bookkeeping for
  *              the vendored Cypht app.
  */
-class CyphtInstallState
+class CyphtPaths
 {
 	/**
 	 * Absolute path to the module root (three levels up from this file:

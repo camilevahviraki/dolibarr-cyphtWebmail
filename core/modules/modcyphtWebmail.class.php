@@ -349,7 +349,7 @@ class modcyphtWebmail extends DolibarrModules
 			'prefix' => img_picto('', $this->picto, 'class="pictofixedwidth valignmiddle"'),
 			'mainmenu' => 'cyphtwebmail',
 			'leftmenu' => '',
-			'url' => '/cyphtWebmail/cyphtWebmailindex.php',
+			'url' => '/cyphtWebmail/index.php',
 			'langs' => 'cyphtwebmail@cyphtwebmail', // Lang file to use (without .lang) by module. File must be in langs/code_CODE/ directory.
 			'position' => 1000 + $r,
 			'enabled' => "isModEnabled('cyphtwebmail')", // Define condition to show or hide menu entry. Use "isModEnabled('cyphtWebmail')" if entry must be visible if module is enabled (those quote marks are importants).
@@ -379,7 +379,7 @@ class modcyphtWebmail extends DolibarrModules
 			'prefix' => img_picto('', $this->picto, 'class="pictofixedwidth valignmiddle paddingright"'),
 			'mainmenu' => 'cyphtwebmail',
 			'leftmenu' => 'cyphtwebmail_index',
-			'url' => '/cyphtWebmail/cyphtWebmailindex.php',
+			'url' => '/cyphtWebmail/index.php',
 			'langs' => 'cyphtwebmail@cyphtwebmail',
 			'position' => 1000 + $r,
 			'enabled' => "isModEnabled('cyphtwebmail')",
@@ -506,7 +506,7 @@ class modcyphtWebmail extends DolibarrModules
 			'prefix' => img_picto('', $this->picto, 'class="pictofixedwidth valignmiddle paddingright"'),
 			'mainmenu' => 'cyphtWebmail',
 			'leftmenu' => 'myobject',
-			'url' => '/cyphtWebmail/cyphtWebmailindex.php',
+			'url' => '/cyphtWebmail/index.php',
 			'langs' => 'cyphtWebmail@cyphtWebmail',	        // Lang file to use (without .lang) by module. File must be in langs/code_CODE/ directory.
 			'position' => 1000 + $r,
 			'enabled' => "isModEnabled('cyphtWebmail')", // Define condition to show or hide menu entry. Use isModEnabled("cyphtWebmail") if entry must be visible if module is enabled.

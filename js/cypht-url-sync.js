@@ -21,7 +21,7 @@
  * The whole Cypht query string is nested in one "cypht" parameter rather than
  * mirrored as separate ones: Cypht uses page/id/uid/list_path and Dolibarr
  * uses action/id/token, and merging the two namespaces collides on "id".
- * cyphtWebmailindex.php reads it back and builds the iframe src from it.
+ * index.php reads it back and builds the iframe src from it.
  */
 (function () {
 	'use strict';

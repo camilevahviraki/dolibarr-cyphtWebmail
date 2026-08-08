@@ -15,17 +15,17 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
 
 /**
- * \file        class/sso/cyphtssobridge.class.php
+ * \file        class/auth/sso.class.php
  * \ingroup     cyphtWebmail
  * \brief       Dolibarr -> Cypht single sign-on bridge. Owns the shared
  *              HMAC secret, short-lived login tokens, and the in-process
  *              "functional login" call. The modules/site override itself is
  *              installed by CyphtModuleInstaller.
  */
-class CyphtSsoBridge
+class CyphtSso
 {
 	/**
 	 * @var DoliDB
@@ -38,15 +38,15 @@ class CyphtSsoBridge
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
 	 * @param DoliDB $db Database handler
-	 * @param CyphtInstallState $paths
+	 * @param CyphtPaths $paths
 	 */
-	public function __construct($db, CyphtInstallState $paths)
+	public function __construct($db, CyphtPaths $paths)
 	{
 		$this->db = $db;
 		$this->paths = $paths;
@@ -157,7 +157,7 @@ class CyphtSsoBridge
 	 * hm_id/hm_session cookies). Must be called before any HTML output.
 	 *
 	 * Skips the login entirely if a live session already exists for this
-	 * user (see hasLiveSsoSession()): cyphtWebmailindex.php calls this on
+	 * user (see hasLiveSsoSession()): index.php calls this on
 	 * every page load, and cypht_login() always resets the session data,
 	 * which was silently discarding settings/servers that Cypht hadn't
 	 * yet flagged for permanent storage. Requests made inside the iframe

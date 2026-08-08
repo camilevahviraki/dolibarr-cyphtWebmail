@@ -18,7 +18,7 @@
 /**
  * \file        admin/build/build.php
  * \ingroup     cyphtWebmail
- * \brief       Build page: runs Cypht's config_gen.php through CyphtManager.
+ * \brief       Build page: runs Cypht's config_gen.php through CyphtWebmail.
  */
 
 // Load Dolibarr environment
@@ -43,7 +43,7 @@ if (!$res) {
 
 require_once DOL_DOCUMENT_ROOT.'/core/lib/admin.lib.php';
 require_once DOL_DOCUMENT_ROOT.'/core/class/html.form.class.php';
-require_once __DIR__.'/../../class/cyphtmanager.class.php';
+require_once __DIR__.'/../../class/webmail.class.php';
 
 global $conf, $db, $langs, $user;
 
@@ -62,7 +62,7 @@ if (GETPOST('token', 'alpha') !== currentToken()) {
 	exit;
 }
 
-$manager = new CyphtManager($db);
+$manager = new CyphtWebmail($db);
 $buildResult = null;
 
 @set_time_limit(300);

@@ -54,7 +54,7 @@ if (!$res) {
 	die("Include of main fails");
 }
 
-require_once __DIR__.'/../../class/cyphtmanager.class.php';
+require_once __DIR__.'/../../class/webmail.class.php';
 
 global $conf, $db, $user;
 
@@ -73,7 +73,7 @@ if (GETPOST('token', 'alpha') !== currentToken()) {
 	exit;
 }
 
-$manager = new CyphtManager($db);
+$manager = new CyphtWebmail($db);
 echo json_encode($manager->requestCancel());
 
 $db->close();

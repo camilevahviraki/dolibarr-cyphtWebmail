@@ -15,22 +15,22 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
-require_once __DIR__ . '/../env/cyphtenvconfig.class.php';
-require_once __DIR__ . '/../vendor/cyphtvendorbridge.class.php';
-require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
-require_once __DIR__ . '/../upstream/cyphtupstreampatcher.class.php';
-require_once __DIR__ . '/../cypht/cyphtmoduleinstaller.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
+require_once __DIR__ . '/../install/environment.class.php';
+require_once __DIR__ . '/../install/vendorlayout.class.php';
+require_once __DIR__ . '/../auth/sso.class.php';
+require_once __DIR__ . '/../install/upstreampatches.class.php';
+require_once __DIR__ . '/../install/moduleinstaller.class.php';
 
 /**
- * \file        class/build/cyphtbuildpipeline.class.php
+ * \file        class/install/pipeline.class.php
  * \ingroup     cyphtWebmail
  * \brief       Runs the "Generate" pipeline: composer install, Cypht's
- *              config_gen.php, then publish. Depends on CyphtEnvConfig,
- *              CyphtVendorBridge, CyphtSsoBridge and CyphtUpstreamPatcher;
- *              see class/cyphtmanager.class.php for the facade.
+ *              config_gen.php, then publish. Depends on CyphtEnvironment,
+ *              CyphtVendorLayout, CyphtSso and CyphtUpstreamPatches;
+ *              see class/webmail.class.php for the facade.
  */
-class CyphtBuildPipeline
+class CyphtPipeline
 {
 	/**
 	 * @var DoliDB
@@ -43,27 +43,27 @@ class CyphtBuildPipeline
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @var CyphtEnvConfig
+	 * @var CyphtEnvironment
 	 */
 	private $envConfig;
 
 	/**
-	 * @var CyphtVendorBridge
+	 * @var CyphtVendorLayout
 	 */
 	private $vendorBridge;
 
 	/**
-	 * @var CyphtSsoBridge
+	 * @var CyphtSso
 	 */
 	private $sso;
 
 	/**
-	 * @var CyphtUpstreamPatcher
+	 * @var CyphtUpstreamPatches
 	 */
 	private $upstreamPatcher;
 
@@ -74,20 +74,20 @@ class CyphtBuildPipeline
 
 	/**
 	 * @param DoliDB $db
-	 * @param CyphtInstallState $paths
-	 * @param CyphtEnvConfig $envConfig
-	 * @param CyphtVendorBridge $vendorBridge
-	 * @param CyphtSsoBridge $sso
-	 * @param CyphtUpstreamPatcher $upstreamPatcher
+	 * @param CyphtPaths $paths
+	 * @param CyphtEnvironment $envConfig
+	 * @param CyphtVendorLayout $vendorBridge
+	 * @param CyphtSso $sso
+	 * @param CyphtUpstreamPatches $upstreamPatcher
 	 * @param CyphtModuleInstaller $moduleInstaller
 	 */
 	public function __construct(
 		$db,
-		CyphtInstallState $paths,
-		CyphtEnvConfig $envConfig,
-		CyphtVendorBridge $vendorBridge,
-		CyphtSsoBridge $sso,
-		CyphtUpstreamPatcher $upstreamPatcher,
+		CyphtPaths $paths,
+		CyphtEnvironment $envConfig,
+		CyphtVendorLayout $vendorBridge,
+		CyphtSso $sso,
+		CyphtUpstreamPatches $upstreamPatcher,
 		CyphtModuleInstaller $moduleInstaller
 	) {
 		$this->db = $db;
