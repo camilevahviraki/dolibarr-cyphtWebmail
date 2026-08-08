@@ -15,141 +15,41 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
+require_once __DIR__ . '/token.class.php';
 
 /**
- * \file        class/sso/cyphtssobridge.class.php
+ * \file        class/auth/login.class.php
  * \ingroup     cyphtWebmail
- * \brief       Dolibarr -> Cypht single sign-on bridge. Owns the shared
- *              HMAC secret, short-lived login tokens, and the in-process
- *              "functional login" call. The modules/site override itself is
- *              installed by CyphtModuleInstaller.
+ * \brief       Logs the current Dolibarr user into Cypht in-process, and
+ *              tracks whether a live session already exists.
  */
-class CyphtSsoBridge
+class CyphtLogin
 {
-	/**
-	 * @var DoliDB
-	 */
-	public $db;
-
 	/**
 	 * @var string  Last error message, if any call returned false/failure.
 	 */
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @param DoliDB $db Database handler
-	 * @param CyphtInstallState $paths
+	 * @var CyphtToken
 	 */
-	public function __construct($db, CyphtInstallState $paths)
+	private $token;
+
+	/**
+	 * @param CyphtPaths $paths
+	 * @param CyphtToken $token
+	 */
+	public function __construct(CyphtPaths $paths, CyphtToken $token)
 	{
-		$this->db = $db;
 		$this->paths = $paths;
+		$this->token = $token;
 	}
-
-	/**
-	 * Secret signing the short-lived SSO tokens (see generateSsoLoginToken()).
-	 * Persisted in llx_const and mirrored into Cypht's .env so
-	 * Custom_Auth::check_credentials() can verify against it.
-	 *
-	 * @return string
-	 */
-	public function getOrCreateSsoSecret()
-	{
-		global $conf;
-
-		$secret = getDolGlobalString('CYPHTWEBMAIL_SSO_SECRET', '');
-		if ($secret !== '') {
-			return $secret;
-		}
-
-		$secret = bin2hex(random_bytes(32));
-		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_SSO_SECRET', $secret, 'chaine', 0, '', $conf->entity);
-
-		return $secret;
-	}
-
-	/**
-	 * Filesystem path of a user's Cypht settings file.
-	 *
-	 * MUST stay in step with Custom_User_Config::get_path() in the generated
-	 * modules/site/lib.php: Cypht writes the file, Dolibarr deletes it, and
-	 * neither can see the other's code. The readable prefix is cosmetic; the
-	 * sha256 fragment is what keeps two logins that sanitise identically
-	 * ("jean dupont" and "jean_dupont") from sharing one file.
-	 *
-	 * @param string $login Dolibarr login
-	 * @return string
-	 */
-	public function getUserSettingsPath($login)
-	{
-		$dir = $this->paths->getDataDir() . '/users';
-		$safe = substr(preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $login), 0, 64);
-		$fingerprint = substr(hash('sha256', (string) $login), 0, 12);
-
-		return $dir . '/' . $safe . '-' . $fingerprint . '.json';
-	}
-
-	/**
-	 * Pre-collision-fix filename, still cleaned up on user deletion so an
-	 * upgrade does not strand an old file holding mailbox credentials.
-	 *
-	 * @param string $login Dolibarr login
-	 * @return string
-	 */
-	public function getLegacyUserSettingsPath($login)
-	{
-		$dir = $this->paths->getDataDir() . '/users';
-
-		return $dir . '/' . preg_replace('/[^a-zA-Z0-9_.@-]/', '_', (string) $login) . '.json';
-	}
-
-	/**
-	 * Key encrypting the mailbox passwords in the stored user config.
-	 *
-	 * Separate from the SSO secret: that one authenticates short-lived login
-	 * assertions, this one protects data at rest. Server-held rather than
-	 * derived from the user, since under SSO there is no stable password.
-	 *
-	 * @return string
-	 */
-	public function getOrCreateConfigSecret()
-	{
-		global $conf;
-
-		$secret = getDolGlobalString('CYPHTWEBMAIL_CONFIG_SECRET', '');
-		if ($secret !== '') {
-			return $secret;
-		}
-
-		$secret = bin2hex(random_bytes(32));
-		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_CONFIG_SECRET', $secret, 'chaine', 0, '', $conf->entity);
-
-		return $secret;
-	}
-
-	/**
-	 * HMAC token proving "this is really the current Dolibarr user", passed
-	 * to Cypht's cypht_login() as the password. Never a real mailbox
-	 * credential. Valid for 60s to limit replay.
-	 *
-	 * @param string $login Dolibarr username to embed in the token
-	 * @return string
-	 */
-	public function generateSsoLoginToken($login)
-	{
-		$secret = $this->getOrCreateSsoSecret();
-		$timestamp = time();
-		$signature = hash_hmac('sha256', $login . '|' . $timestamp, $secret);
-
-		return $timestamp . '.' . $signature;
-	}
-
 
 	/**
 	 * Logs the given Dolibarr user into Cypht via its "functional login"
@@ -157,7 +57,7 @@ class CyphtSsoBridge
 	 * hm_id/hm_session cookies). Must be called before any HTML output.
 	 *
 	 * Skips the login entirely if a live session already exists for this
-	 * user (see hasLiveSsoSession()): cyphtWebmailindex.php calls this on
+	 * user (see hasLiveSsoSession()): index.php calls this on
 	 * every page load, and cypht_login() always resets the session data,
 	 * which was silently discarding settings/servers that Cypht hadn't
 	 * yet flagged for permanent storage. Requests made inside the iframe
@@ -183,7 +83,7 @@ class CyphtSsoBridge
 
 		require_once $apiFile;
 
-		$token = $this->generateSsoLoginToken($login);
+		$token = $this->token->generateSsoLoginToken($login);
 
 		$ok = cypht_login($login, $token, $this->absolutizeUrl($cyphtUrl));
 		if ($ok) {

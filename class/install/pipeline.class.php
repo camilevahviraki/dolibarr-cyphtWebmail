@@ -15,22 +15,22 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
-require_once __DIR__ . '/../env/cyphtenvconfig.class.php';
-require_once __DIR__ . '/../vendor/cyphtvendorbridge.class.php';
-require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
-require_once __DIR__ . '/../upstream/cyphtupstreampatcher.class.php';
-require_once __DIR__ . '/../cypht/cyphtmoduleinstaller.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
+require_once __DIR__ . '/../install/environment.class.php';
+require_once __DIR__ . '/../install/vendorlayout.class.php';
+require_once __DIR__ . '/../auth/login.class.php';
+require_once __DIR__ . '/../install/upstreampatches.class.php';
+require_once __DIR__ . '/../install/moduleinstaller.class.php';
 
 /**
- * \file        class/build/cyphtbuildpipeline.class.php
+ * \file        class/install/pipeline.class.php
  * \ingroup     cyphtWebmail
  * \brief       Runs the "Generate" pipeline: composer install, Cypht's
- *              config_gen.php, then publish. Depends on CyphtEnvConfig,
- *              CyphtVendorBridge, CyphtSsoBridge and CyphtUpstreamPatcher;
- *              see class/cyphtmanager.class.php for the facade.
+ *              config_gen.php, then publish. Depends on CyphtEnvironment,
+ *              CyphtVendorLayout and CyphtUpstreamPatches;
+ *              see class/webmail.class.php for the facade.
  */
-class CyphtBuildPipeline
+class CyphtPipeline
 {
 	/**
 	 * @var DoliDB
@@ -43,27 +43,27 @@ class CyphtBuildPipeline
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @var CyphtEnvConfig
+	 * @var CyphtEnvironment
 	 */
 	private $envConfig;
 
 	/**
-	 * @var CyphtVendorBridge
+	 * @var CyphtVendorLayout
 	 */
 	private $vendorBridge;
 
 	/**
-	 * @var CyphtSsoBridge
+	 * @var CyphtLogin
 	 */
-	private $sso;
+	private $login;
 
 	/**
-	 * @var CyphtUpstreamPatcher
+	 * @var CyphtUpstreamPatches
 	 */
 	private $upstreamPatcher;
 
@@ -74,27 +74,27 @@ class CyphtBuildPipeline
 
 	/**
 	 * @param DoliDB $db
-	 * @param CyphtInstallState $paths
-	 * @param CyphtEnvConfig $envConfig
-	 * @param CyphtVendorBridge $vendorBridge
-	 * @param CyphtSsoBridge $sso
-	 * @param CyphtUpstreamPatcher $upstreamPatcher
+	 * @param CyphtPaths $paths
+	 * @param CyphtEnvironment $envConfig
+	 * @param CyphtVendorLayout $vendorBridge
+	 * @param CyphtLogin $login
+	 * @param CyphtUpstreamPatches $upstreamPatcher
 	 * @param CyphtModuleInstaller $moduleInstaller
 	 */
 	public function __construct(
 		$db,
-		CyphtInstallState $paths,
-		CyphtEnvConfig $envConfig,
-		CyphtVendorBridge $vendorBridge,
-		CyphtSsoBridge $sso,
-		CyphtUpstreamPatcher $upstreamPatcher,
+		CyphtPaths $paths,
+		CyphtEnvironment $envConfig,
+		CyphtVendorLayout $vendorBridge,
+		CyphtLogin $login,
+		CyphtUpstreamPatches $upstreamPatcher,
 		CyphtModuleInstaller $moduleInstaller
 	) {
 		$this->db = $db;
 		$this->paths = $paths;
 		$this->envConfig = $envConfig;
 		$this->vendorBridge = $vendorBridge;
-		$this->sso = $sso;
+		$this->login = $login;
 		$this->upstreamPatcher = $upstreamPatcher;
 		$this->moduleInstaller = $moduleInstaller;
 	}
@@ -421,6 +421,61 @@ class CyphtBuildPipeline
 	 *
 	 * @return string|null Path to a php executable, or null if none found.
 	 */
+	/**
+	 * Whether this server can build from the browser at all, and why not.
+	 *
+	 * The button needs a PHP CLI binary, Composer, proc_open() and write
+	 * access, any of which a host may withhold. Checking first turns a
+	 * mid-build failure into an upfront answer with the command to run
+	 * instead.
+	 *
+	 * @return array{ok:bool,checks:array<int,array{label:string,ok:bool,detail:string}>}
+	 */
+	public function checkBuildRequirements()
+	{
+		$checks = array();
+
+		$checks[] = array(
+			'label' => 'proc_open()',
+			'ok' => function_exists('proc_open'),
+			'detail' => function_exists('proc_open') ? 'available' : 'disabled in php.ini for the web server',
+		);
+
+		$php = $this->findPhpBinary();
+		$checks[] = array(
+			'label' => 'PHP command line binary',
+			'ok' => ($php !== null),
+			'detail' => ($php !== null) ? $php : 'not found on PATH or in the usual locations',
+		);
+
+		$composer = $this->findComposerBinary();
+		$hasVendor = is_dir($this->paths->getCyphtPath());
+		$checks[] = array(
+			'label' => 'Composer',
+			'ok' => ($composer !== null || $hasVendor),
+			'detail' => ($composer !== null)
+				? implode(' ', $composer)
+				: ($hasVendor ? 'not found, but vendor/ is already present' : 'not found, and vendor/ is missing'),
+		);
+
+		$root = $this->paths->getModuleRoot();
+		$writable = is_writable($root) && (!is_dir($root.'/vendor') || is_writable($root.'/vendor'));
+		$checks[] = array(
+			'label' => 'Write access for the web server user',
+			'ok' => $writable,
+			'detail' => $writable ? $root : 'cannot write to '.$root,
+		);
+
+		$ok = true;
+		foreach ($checks as $check) {
+			if (!$check['ok']) {
+				$ok = false;
+			}
+		}
+
+		return array('ok' => $ok, 'checks' => $checks);
+	}
+
 	private function findPhpBinary()
 	{
 		$sapi = php_sapi_name();
@@ -748,6 +803,11 @@ class CyphtBuildPipeline
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
 		$emit(sprintf("[copy finished in %.1fs]\n", microtime(true) - $stepStart));
+
+		// main.inc.php pulls admin.lib.php in for us; master.inc.php, which is
+		// all a command line build loads, does not. Ask for it here so the
+		// build does not die on the last line after doing all the work.
+		require_once DOL_DOCUMENT_ROOT . '/core/lib/admin.lib.php';
 
 		$version = $this->paths->getInstalledVersion();
 		dolibarr_set_const($this->db, 'CYPHTWEBMAIL_LAST_BUILD', dol_now(), 'chaine', 0, '', $conf->entity);

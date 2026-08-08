@@ -15,10 +15,10 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
 
 /**
- * \file        class/contacts/cyphtcontactsbridge.class.php
+ * \file        class/integration/contactsource.class.php
  * \ingroup     cyphtWebmail
  * \brief       Installs the "dolibarr_contacts" Cypht module set, which
  *              exposes Dolibarr third parties and contacts to Cypht as a
@@ -28,7 +28,7 @@ require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
  *              and is copied into vendor/jason-munro/cypht on every build,
  *              so a "composer update" cannot silently revert it.
  */
-class CyphtContactsBridge
+class CyphtContactSource
 {
 	/**
 	 * @var DoliDB
@@ -41,21 +41,21 @@ class CyphtContactsBridge
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * Module set name. Must also appear in CyphtEnvConfig's CYPHT_MODULES
+	 * Module set name. Must also appear in CyphtEnvironment's CYPHT_MODULES
 	 * list, or config_gen.php never scans it.
 	 */
 	const MODULE_NAME = 'dolibarr_contacts';
 
 	/**
 	 * @param DoliDB $db Database handler
-	 * @param CyphtInstallState $paths
+	 * @param CyphtPaths $paths
 	 */
-	public function __construct($db, CyphtInstallState $paths)
+	public function __construct($db, CyphtPaths $paths)
 	{
 		$this->db = $db;
 		$this->paths = $paths;
@@ -72,7 +72,7 @@ class CyphtContactsBridge
 	}
 
 	/**
-	 * Static form, so CyphtEnvConfig can build the .env line without an
+	 * Static form, so CyphtEnvironment can build the .env line without an
 	 * instance and without a $db handle it has no other use for.
 	 *
 	 * @return string

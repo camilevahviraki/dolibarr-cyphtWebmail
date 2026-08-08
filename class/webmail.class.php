@@ -16,31 +16,33 @@
  */
 
 /**
- * \file        class/cyphtmanager.class.php
+ * \file        class/webmail.class.php
  * \ingroup     cyphtWebmail
  * \brief       Facade over the Dolibarr<->Cypht glue code. Delegates to one
  *              collaborator per subfolder of class/:
  *
- *   class/state/cyphtinstallstate.class.php        CyphtInstallState     paths, installed/built version bookkeeping
- *   class/env/cyphtenvconfig.class.php             CyphtEnvConfig        .env overrides, writing .env
- *   class/vendor/cyphtvendorbridge.class.php       CyphtVendorBridge     flat-composer-dependency vendor/ bridge, recursive copy/delete
- *   class/sso/cyphtssobridge.class.php             CyphtSsoBridge        SSO secrets, tokens, functional login
- *   class/cypht/cyphtmoduleinstaller.class.php     CyphtModuleInstaller  installs cypht/modules/* into the vendored Cypht
- *   class/contacts/cyphtcontactsbridge.class.php   CyphtContactsBridge   contacts bridge URL resolution
- *   class/upstream/cyphtupstreampatcher.class.php  CyphtUpstreamPatcher  patches upstream Cypht gaps
- *   class/build/cyphtbuildpipeline.class.php       CyphtBuildPipeline    composer install + config_gen.php + publish
+ *   class/install/paths.class.php        CyphtPaths     paths, installed/built version bookkeeping
+ *   class/install/environment.class.php             CyphtEnvironment        .env overrides, writing .env
+ *   class/install/vendorlayout.class.php       CyphtVendorLayout     flat-composer-dependency vendor/ bridge, recursive copy/delete
+ *   class/auth/token.class.php                     CyphtToken            shared secrets and HMAC assertions
+ *   class/auth/login.class.php                     CyphtLogin            functional login into Cypht
+ *   class/install/moduleinstaller.class.php     CyphtModuleInstaller  installs cypht/modules/* into the vendored Cypht
+ *   class/integration/contactsource.class.php   CyphtContactSource   contacts bridge URL resolution
+ *   class/install/upstreampatches.class.php  CyphtUpstreamPatches  patches upstream Cypht gaps
+ *   class/install/pipeline.class.php       CyphtPipeline    composer install + config_gen.php + publish
  */
 
-require_once __DIR__ . '/state/cyphtinstallstate.class.php';
-require_once __DIR__ . '/env/cyphtenvconfig.class.php';
-require_once __DIR__ . '/vendor/cyphtvendorbridge.class.php';
-require_once __DIR__ . '/sso/cyphtssobridge.class.php';
-require_once __DIR__ . '/upstream/cyphtupstreampatcher.class.php';
-require_once __DIR__ . '/contacts/cyphtcontactsbridge.class.php';
-require_once __DIR__ . '/cypht/cyphtmoduleinstaller.class.php';
-require_once __DIR__ . '/build/cyphtbuildpipeline.class.php';
+require_once __DIR__ . '/install/paths.class.php';
+require_once __DIR__ . '/install/environment.class.php';
+require_once __DIR__ . '/install/vendorlayout.class.php';
+require_once __DIR__ . '/auth/token.class.php';
+require_once __DIR__ . '/auth/login.class.php';
+require_once __DIR__ . '/install/upstreampatches.class.php';
+require_once __DIR__ . '/integration/contactsource.class.php';
+require_once __DIR__ . '/install/moduleinstaller.class.php';
+require_once __DIR__ . '/install/pipeline.class.php';
 
-class CyphtManager
+class CyphtWebmail
 {
 	/**
 	 * @var DoliDB
@@ -53,27 +55,32 @@ class CyphtManager
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @var CyphtEnvConfig
+	 * @var CyphtEnvironment
 	 */
 	private $envConfig;
 
 	/**
-	 * @var CyphtVendorBridge
+	 * @var CyphtVendorLayout
 	 */
 	private $vendorBridge;
 
 	/**
-	 * @var CyphtSsoBridge
+	 * @var CyphtToken
 	 */
-	private $sso;
+	private $token;
 
 	/**
-	 * @var CyphtUpstreamPatcher
+	 * @var CyphtLogin
+	 */
+	private $login;
+
+	/**
+	 * @var CyphtUpstreamPatches
 	 */
 	private $upstreamPatcher;
 
@@ -83,7 +90,7 @@ class CyphtManager
 	private $moduleInstaller;
 
 	/**
-	 * @var CyphtBuildPipeline
+	 * @var CyphtPipeline
 	 */
 	private $buildPipeline;
 
@@ -94,18 +101,19 @@ class CyphtManager
 	{
 		$this->db = $db;
 
-		$this->paths = new CyphtInstallState();
-		$this->sso = new CyphtSsoBridge($db, $this->paths);
-		$this->envConfig = new CyphtEnvConfig($this->paths, $this->sso);
-		$this->vendorBridge = new CyphtVendorBridge($this->paths);
-		$this->upstreamPatcher = new CyphtUpstreamPatcher($this->paths);
+		$this->paths = new CyphtPaths();
+		$this->token = new CyphtToken($db);
+		$this->login = new CyphtLogin($this->paths, $this->token);
+		$this->envConfig = new CyphtEnvironment($this->paths, $this->token);
+		$this->vendorBridge = new CyphtVendorLayout($this->paths);
+		$this->upstreamPatcher = new CyphtUpstreamPatches($this->paths);
 		$this->moduleInstaller = new CyphtModuleInstaller($this->paths);
-		$this->buildPipeline = new CyphtBuildPipeline(
+		$this->buildPipeline = new CyphtPipeline(
 			$db,
 			$this->paths,
 			$this->envConfig,
 			$this->vendorBridge,
-			$this->sso,
+			$this->login,
 			$this->upstreamPatcher,
 			$this->moduleInstaller
 		);
@@ -119,7 +127,7 @@ class CyphtManager
 	 */
 	public function getUserSettingsPath($login)
 	{
-		return $this->sso->getUserSettingsPath($login);
+		return $this->paths->getUserSettingsPath($login);
 	}
 
 	/**
@@ -128,10 +136,10 @@ class CyphtManager
 	 */
 	public function getLegacyUserSettingsPath($login)
 	{
-		return $this->sso->getLegacyUserSettingsPath($login);
+		return $this->paths->getLegacyUserSettingsPath($login);
 	}
 
-	// ---- CyphtInstallState ----
+	// ---- CyphtPaths ----
 
 	/** @return string */
 	public function getModuleRoot()
@@ -193,7 +201,7 @@ class CyphtManager
 		return $this->paths->isPublished();
 	}
 
-	// ---- CyphtEnvConfig ----
+	// ---- CyphtEnvironment ----
 
 	/** @return array<string,string> */
 	public function buildEnvOverrides()
@@ -212,12 +220,12 @@ class CyphtManager
 		return $result;
 	}
 
-	// ---- CyphtSsoBridge ----
+	// ---- Auth ----
 
 	/** @return string */
 	public function getOrCreateSsoSecret()
 	{
-		return $this->sso->getOrCreateSsoSecret();
+		return $this->token->getOrCreateSsoSecret();
 	}
 
 	/**
@@ -226,7 +234,7 @@ class CyphtManager
 	 */
 	public function generateSsoLoginToken($login)
 	{
-		return $this->sso->generateSsoLoginToken($login);
+		return $this->token->generateSsoLoginToken($login);
 	}
 
 	/**
@@ -236,12 +244,12 @@ class CyphtManager
 	 */
 	public function performSsoLogin($login, $cyphtUrl)
 	{
-		$result = $this->sso->performSsoLogin($login, $cyphtUrl);
-		$this->error = $this->sso->error;
+		$result = $this->login->performSsoLogin($login, $cyphtUrl);
+		$this->error = $this->login->error;
 		return $result;
 	}
 
-	// ---- CyphtBuildPipeline ----
+	// ---- CyphtPipeline ----
 
 	/** @return bool */
 	public function publishSite()
@@ -249,6 +257,14 @@ class CyphtManager
 		$result = $this->buildPipeline->publishSite();
 		$this->error = $this->buildPipeline->error;
 		return $result;
+	}
+
+	/**
+	 * @return array{ok:bool,checks:array}
+	 */
+	public function checkBuildRequirements()
+	{
+		return $this->buildPipeline->checkBuildRequirements();
 	}
 
 	/** @return array{success:bool,message:string} */

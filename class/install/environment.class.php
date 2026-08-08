@@ -15,16 +15,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
-require_once __DIR__ . '/../sso/cyphtssobridge.class.php';
-require_once __DIR__ . '/../contacts/cyphtcontactsbridge.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
+require_once __DIR__ . '/../auth/token.class.php';
+require_once __DIR__ . '/../integration/contactsource.class.php';
 
 /**
- * \file        class/env/cyphtenvconfig.class.php
+ * \file        class/install/environment.class.php
  * \ingroup     cyphtWebmail
  * \brief       Builds and writes Cypht's .env file from Dolibarr constants.
  */
-class CyphtEnvConfig
+class CyphtEnvironment
 {
 	/**
 	 * @var string  Last error message, if any call returned false/failure.
@@ -32,23 +32,23 @@ class CyphtEnvConfig
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @var CyphtSsoBridge
+	 * @var CyphtToken
 	 */
-	private $sso;
+	private $token;
 
 	/**
-	 * @param CyphtInstallState $paths
-	 * @param CyphtSsoBridge $sso
+	 * @param CyphtPaths $paths
+	 * @param CyphtToken $token
 	 */
-	public function __construct(CyphtInstallState $paths, CyphtSsoBridge $sso)
+	public function __construct(CyphtPaths $paths, CyphtToken $token)
 	{
 		$this->paths = $paths;
-		$this->sso = $sso;
+		$this->token = $token;
 	}
 
 	/**
@@ -104,14 +104,14 @@ class CyphtEnvConfig
 			'CYPHT_MODULES'    => 'core,contacts,dolibarr_contacts,imap,smtp,api_login,account,nux,developer,history,saved_searches,advanced_search,profiles,inline_message,imap_folders,keyboard_shortcuts,site,dynamic_login,sievefilters,themes',
 			'DISABLE_FINGERPRINT' => 'true',
 			'DISABLE_EMPTY_SUPERGLOBALS' => 'true',
-			'SSO_SHARED_SECRET' => $this->sso->getOrCreateSsoSecret(),
+			'SSO_SHARED_SECRET' => $this->token->getOrCreateSsoSecret(),
 			// Encrypts the mailbox passwords inside the stored config.
-			'USER_CONFIG_SECRET' => $this->sso->getOrCreateConfigSecret(),
+			'USER_CONFIG_SECRET' => $this->token->getOrCreateConfigSecret(),
 			'SESSION_DEBUG'      => getDolGlobalString('CYPHTWEBMAIL_SESSION_DEBUG', 'false'),
 			'SESSION_TTL'        => getDolGlobalString('CYPHTWEBMAIL_SESSION_TTL', '604800'),
 			'SESSION_GC_DIVISOR' => getDolGlobalString('CYPHTWEBMAIL_SESSION_GC_DIVISOR', '200'),
 			'DISABLE_OPEN_BASE_DIR' => 'true',
-			'DOLIBARR_CONTACTS_URL' => CyphtContactsBridge::resolveBridgeUrl(),
+			'DOLIBARR_CONTACTS_URL' => CyphtContactSource::resolveBridgeUrl(),
 			'DOLIBARR_CONTACTS_TTL' => getDolGlobalString('CYPHTWEBMAIL_CONTACTS_TTL', '300'),
 			'DOLIBARR_CONTACTS_TIMEOUT' => getDolGlobalString('CYPHTWEBMAIL_CONTACTS_TIMEOUT', '5'),
 			'DOLIBARR_CONTACTS_INSECURE' => getDolGlobalString('CYPHTWEBMAIL_CONTACTS_INSECURE', 'false'),

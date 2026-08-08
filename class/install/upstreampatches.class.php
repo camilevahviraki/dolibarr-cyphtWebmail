@@ -15,16 +15,16 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-require_once __DIR__ . '/../state/cyphtinstallstate.class.php';
+require_once __DIR__ . '/../install/paths.class.php';
 
 /**
- * \file        class/upstream/cyphtupstreampatcher.class.php
+ * \file        class/install/upstreampatches.class.php
  * \ingroup     cyphtWebmail
  * \brief       Patches an upstream Cypht bug that surfaces once a module's
  *              functions.php gets require()'d twice in the same process,
  *              which performSsoLogin()'s "functional login" call does.
  */
-class CyphtUpstreamPatcher
+class CyphtUpstreamPatches
 {
 	/**
 	 * @var string  Last error message, if any call returned false/failure.
@@ -32,14 +32,14 @@ class CyphtUpstreamPatcher
 	public $error = '';
 
 	/**
-	 * @var CyphtInstallState
+	 * @var CyphtPaths
 	 */
 	private $paths;
 
 	/**
-	 * @param CyphtInstallState $paths
+	 * @param CyphtPaths $paths
 	 */
-	public function __construct(CyphtInstallState $paths)
+	public function __construct(CyphtPaths $paths)
 	{
 		$this->paths = $paths;
 	}

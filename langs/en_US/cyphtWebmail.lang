@@ -74,3 +74,8 @@ CyphtMenuEmailTemplates=Email templates
 CyphtMenuMassEmailing=Mass emailing
 CyphtMenuModuleSetup=Module setup
 
+
+# Build preflight (admin/setup.php)
+CyphtWebmailCannotBuildHere=This server cannot build from the browser.
+CyphtWebmailBuildFromShell=Run the build from a terminal instead:
+CyphtWebmailRebuildFromShell=Cypht is built and running. This server cannot rebuild it from the browser; to rebuild, run this from the module folder:

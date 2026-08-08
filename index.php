@@ -16,11 +16,11 @@
  */
 
 /**
- * \file        cyphtWebmailindex.php
+ * \file        index.php
  * \ingroup     cyphtWebmail
  * \brief       Entry point reached from the top menu. Logs the current
  *              Dolibarr user into Cypht via SSO (see
- *              CyphtManager::performSsoLogin()) before embedding the
+ *              CyphtWebmail::performSsoLogin()) before embedding the
  *              already-built app, so the iframe opens already authenticated.
  */
 
@@ -41,7 +41,7 @@ if (!$res) {
 	die("Include of main fails");
 }
 
-require_once __DIR__.'/class/cyphtmanager.class.php';
+require_once __DIR__.'/class/webmail.class.php';
 
 global $conf, $db, $langs, $user;
 
@@ -54,7 +54,7 @@ if (!isModEnabled('cyphtwebmail')) {
 	accessforbidden();
 }
 
-$manager = new CyphtManager($db);
+$manager = new CyphtWebmail($db);
 
 // Current Cypht page, carried in one opaque parameter holding Cypht's own
 // query string. Nested rather than mirrored because Cypht uses page/id/uid
