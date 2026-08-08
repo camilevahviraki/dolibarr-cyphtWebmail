@@ -45,33 +45,41 @@ Cypht is LGPL-2.1, Dolibarr is GPL-3.0. This module is GPL-3.0.
 
 ## Installation
 
-### 1. Put the module in Dolibarr's custom folder
+### 1. Put the module in an external modules directory
 
-The module must sit in Dolibarr's `custom` directory - the same place every
-external Dolibarr module goes:
+The module goes in one of Dolibarr's external module directories, set by
+`$dolibarr_main_document_root_alt` in `<dolibarr>/htdocs/conf/conf.php`:
 
+```php
+$dolibarr_main_document_root_alt = '/path/to/dolibarr/htdocs/custom';
 ```
-<dolibarr>/htdocs/custom/cyphtWebmail
+
+That path is yours to choose, and it can hold several directories separated by
+`;` or `,`. When the setting is absent Dolibarr falls back to
+`<dolibarr>/htdocs/custom`, which is why most installs use it and why the rest
+of this file writes paths that way.
+
+**The folder name must be exactly `cyphtWebmail`.** That part is not optional:
+the module loads its own assets and SQL through `dol_buildpath('/cyphtWebmail/...')`
+and `_load_tables('/cyphtWebmail/sql/')`, both of which search the module
+directories by name. The parent path can be anything; the leaf cannot.
+
+Clone or copy it there:
+
+```bash
+cd <your external modules directory>
+git clone <repository-url> cyphtWebmail
 ```
 
-For a typical XAMPP install that is:
+For a typical XAMPP install using the default, the result is:
 
 ```
 C:\xampp\htdocs\dolibarr\htdocs\custom\cyphtWebmail
 ```
 
-Clone or copy it there:
-
-```bash
-cd <dolibarr>/htdocs/custom
-git clone <repository-url> cyphtWebmail
-```
-
-Confirm `custom` is enabled in `<dolibarr>/htdocs/conf/conf.php`:
-
-```php
-$dolibarr_main_document_root_alt = '/path/to/dolibarr/htdocs/custom';
-```
+If the module is not in the tree below Dolibarr, `scripts/build.php` cannot find
+it on its own; pass `--dolibarr=/path/to/htdocs`. See
+[Building from the command line](#building-from-the-command-line).
 
 ### 2. Install the PHP dependencies
 
