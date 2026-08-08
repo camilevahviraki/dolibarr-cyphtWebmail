@@ -18,7 +18,7 @@
 require_once __DIR__ . '/../install/paths.class.php';
 require_once __DIR__ . '/../install/environment.class.php';
 require_once __DIR__ . '/../install/vendorlayout.class.php';
-require_once __DIR__ . '/../auth/sso.class.php';
+require_once __DIR__ . '/../auth/login.class.php';
 require_once __DIR__ . '/../install/upstreampatches.class.php';
 require_once __DIR__ . '/../install/moduleinstaller.class.php';
 
@@ -27,7 +27,7 @@ require_once __DIR__ . '/../install/moduleinstaller.class.php';
  * \ingroup     cyphtWebmail
  * \brief       Runs the "Generate" pipeline: composer install, Cypht's
  *              config_gen.php, then publish. Depends on CyphtEnvironment,
- *              CyphtVendorLayout, CyphtSso and CyphtUpstreamPatches;
+ *              CyphtVendorLayout and CyphtUpstreamPatches;
  *              see class/webmail.class.php for the facade.
  */
 class CyphtPipeline
@@ -58,9 +58,9 @@ class CyphtPipeline
 	private $vendorBridge;
 
 	/**
-	 * @var CyphtSso
+	 * @var CyphtLogin
 	 */
-	private $sso;
+	private $login;
 
 	/**
 	 * @var CyphtUpstreamPatches
@@ -77,7 +77,7 @@ class CyphtPipeline
 	 * @param CyphtPaths $paths
 	 * @param CyphtEnvironment $envConfig
 	 * @param CyphtVendorLayout $vendorBridge
-	 * @param CyphtSso $sso
+	 * @param CyphtLogin $login
 	 * @param CyphtUpstreamPatches $upstreamPatcher
 	 * @param CyphtModuleInstaller $moduleInstaller
 	 */
@@ -86,7 +86,7 @@ class CyphtPipeline
 		CyphtPaths $paths,
 		CyphtEnvironment $envConfig,
 		CyphtVendorLayout $vendorBridge,
-		CyphtSso $sso,
+		CyphtLogin $login,
 		CyphtUpstreamPatches $upstreamPatcher,
 		CyphtModuleInstaller $moduleInstaller
 	) {
@@ -94,7 +94,7 @@ class CyphtPipeline
 		$this->paths = $paths;
 		$this->envConfig = $envConfig;
 		$this->vendorBridge = $vendorBridge;
-		$this->sso = $sso;
+		$this->login = $login;
 		$this->upstreamPatcher = $upstreamPatcher;
 		$this->moduleInstaller = $moduleInstaller;
 	}
@@ -421,6 +421,61 @@ class CyphtPipeline
 	 *
 	 * @return string|null Path to a php executable, or null if none found.
 	 */
+	/**
+	 * Whether this server can build from the browser at all, and why not.
+	 *
+	 * The button needs a PHP CLI binary, Composer, proc_open() and write
+	 * access, any of which a host may withhold. Checking first turns a
+	 * mid-build failure into an upfront answer with the command to run
+	 * instead.
+	 *
+	 * @return array{ok:bool,checks:array<int,array{label:string,ok:bool,detail:string}>}
+	 */
+	public function checkBuildRequirements()
+	{
+		$checks = array();
+
+		$checks[] = array(
+			'label' => 'proc_open()',
+			'ok' => function_exists('proc_open'),
+			'detail' => function_exists('proc_open') ? 'available' : 'disabled in php.ini for the web server',
+		);
+
+		$php = $this->findPhpBinary();
+		$checks[] = array(
+			'label' => 'PHP command line binary',
+			'ok' => ($php !== null),
+			'detail' => ($php !== null) ? $php : 'not found on PATH or in the usual locations',
+		);
+
+		$composer = $this->findComposerBinary();
+		$hasVendor = is_dir($this->paths->getCyphtPath());
+		$checks[] = array(
+			'label' => 'Composer',
+			'ok' => ($composer !== null || $hasVendor),
+			'detail' => ($composer !== null)
+				? implode(' ', $composer)
+				: ($hasVendor ? 'not found, but vendor/ is already present' : 'not found, and vendor/ is missing'),
+		);
+
+		$root = $this->paths->getModuleRoot();
+		$writable = is_writable($root) && (!is_dir($root.'/vendor') || is_writable($root.'/vendor'));
+		$checks[] = array(
+			'label' => 'Write access for the web server user',
+			'ok' => $writable,
+			'detail' => $writable ? $root : 'cannot write to '.$root,
+		);
+
+		$ok = true;
+		foreach ($checks as $check) {
+			if (!$check['ok']) {
+				$ok = false;
+			}
+		}
+
+		return array('ok' => $ok, 'checks' => $checks);
+	}
+
 	private function findPhpBinary()
 	{
 		$sapi = php_sapi_name();
