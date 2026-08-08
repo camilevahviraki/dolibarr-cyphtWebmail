@@ -36,12 +36,24 @@ Cypht is LGPL-2.1, Dolibarr is GPL-3.0. This module is GPL-3.0.
 
 ## Requirements
 
+To run it:
+
 - Dolibarr 19+ (developed against **24.0**)
 - PHP 8.0+ with `curl`, `openssl`, `mbstring`, `dom`, `PDO`
-- **PHP CLI on the server** - the build step shells out to `php scripts/config_gen.php`
-- **Composer** available to the webserver user, or a `composer.phar` in the module root
 - MySQL/MariaDB or PostgreSQL (whatever Dolibarr already uses)
-- `proc_open()` and `exec()` enabled (commonly disabled on shared hosting)
+
+To build it, additionally:
+
+- a **PHP CLI binary**, which the build invokes to run Cypht's `config_gen.php`
+- **Composer**, or a `composer.phar` in the module root, or a `vendor/` that was
+  prepared elsewhere
+- `proc_open()` and `exec()` enabled
+
+The last three are needed only by whichever side runs the build. Building from
+the setup page means the webserver needs them, and shared hosting often disables
+`proc_open()` for exactly that reason. Building from a terminal needs them in
+your shell instead, where they are normally available, which is why
+`scripts/build.php` exists.
 
 ## Installation
 
@@ -54,56 +66,50 @@ The module goes in one of Dolibarr's external module directories, set by
 $dolibarr_main_document_root_alt = '/path/to/dolibarr/htdocs/custom';
 ```
 
-That path is yours to choose, and it can hold several directories separated by
-`;` or `,`. When the setting is absent Dolibarr falls back to
-`<dolibarr>/htdocs/custom`, which is why most installs use it and why the rest
-of this file writes paths that way.
-
-**The folder name must be exactly `cyphtWebmail`.** That part is not optional:
-the module loads its own assets and SQL through `dol_buildpath('/cyphtWebmail/...')`
-and `_load_tables('/cyphtWebmail/sql/')`, both of which search the module
-directories by name. The parent path can be anything; the leaf cannot.
-
 Clone or copy it there:
 
 ```bash
-cd <your external modules directory>
+cd dolibarr/.../<your external modules directory>
 git clone <repository-url> cyphtWebmail
-```
-
-For a typical XAMPP install using the default, the result is:
-
-```
-C:\xampp\htdocs\dolibarr\htdocs\custom\cyphtWebmail
 ```
 
 If the module is not in the tree below Dolibarr, `scripts/build.php` cannot find
 it on its own; pass `--dolibarr=/path/to/htdocs`. See
 [Building from the command line](#building-from-the-command-line).
 
-### 2. Install the PHP dependencies
-
-Cypht itself is a Composer dependency, not vendored in git:
-
-```bash
-cd <dolibarr>/htdocs/custom/cyphtWebmail
-composer install
-```
-
-This pulls `jason-munro/cypht` into `vendor/`. You can skip this step if
-Composer is reachable by the webserver - the build does it for you.
-
 If you received the module as an archive it may already contain `vendor/`. If it
 also contains `public/`, it was packaged wrongly; see
 [Build where it will run](#build-where-it-will-run).
 
-### 3. Enable the module
+### 2. Enable the module
 
 **Home → Setup → Modules/Applications → Interfaces**, find **CyphtWebmail**,
 switch it on.
 
 Enabling creates the database tables (`sql/*.sql` runs automatically), registers
-the triggers, and adds the menu entries.
+the triggers, and adds the menu entries. None of that happens at build time, so
+this step cannot be skipped.
+
+### 3. Build it
+
+Cypht is a Composer dependency and is not usable as shipped, so it has to be
+fetched and compiled. Either way of doing that fetches the dependencies for you;
+there is no need a separate`composer install` step.
+
+From a terminal, on the machine that will serve it:
+
+```bash
+cd <module directory>
+php scripts/build.php
+```
+
+Or from the setup page, if the server allows it: **CyphtWebmail → Module setup
+→ Generate**. The page checks first and shows the shell command instead of the
+button when the webserver cannot run builds.
+
+Both routes do the same work. See
+[Setup and first build](#setup-and-first-build) for what the steps are and when
+to repeat them.
 
 ## Setup and first build
 
@@ -127,8 +133,9 @@ Cypht is not usable as shipped; it has to be compiled. Generate runs three
 steps and streams the log:
 
 1. `composer install` - fetches/updates Cypht
-2. `php scripts/config_gen.php` - Cypht compiles its enabled module sets into
-   `config/dynamic.php` plus bundled `site.css` / `site.js`
+2. `vendor/jason-munro/cypht/scripts/config_gen.php` - Cypht compiles its
+   enabled module sets into `config/dynamic.php` plus bundled `site.css` /
+   `site.js`. This is Cypht's own script, not the module's `scripts/build.php`
 3. **publish** - copies the built `site/` into `public/`, which is what the
    browser actually loads
 
