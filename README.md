@@ -49,11 +49,9 @@ To build it, additionally:
   prepared elsewhere
 - `proc_open()` and `exec()` enabled
 
-The last three are needed only by whichever side runs the build. Building from
-the setup page means the webserver needs them, and shared hosting often disables
-`proc_open()` for exactly that reason. Building from a terminal needs them in
-your shell instead, where they are normally available, which is why
-`scripts/build.php` exists.
+Only whichever side runs the build needs those three. Shared hosting often
+disables `proc_open()` for the webserver, which is why the build can also be run
+from a terminal.
 
 ## Installation
 
@@ -86,30 +84,24 @@ also contains `public/`, it was packaged wrongly; see
 **Home → Setup → Modules/Applications → Interfaces**, find **CyphtWebmail**,
 switch it on.
 
-Enabling creates the database tables (`sql/*.sql` runs automatically), registers
-the triggers, and adds the menu entries. None of that happens at build time, so
-this step cannot be skipped.
+Enabling creates the database tables, registers the triggers and adds the menu
+entries. The build does none of that, so this step cannot be skipped.
 
 ### 3. Build it
 
-Cypht is a Composer dependency and is not usable as shipped, so it has to be
-fetched and compiled. Either way of doing that fetches the dependencies for you;
-there is no need a separate`composer install` step.
-
-From a terminal, on the machine that will serve it:
+Cypht ships as source and has to be compiled before it will run. From a
+terminal, on the machine that will serve it:
 
 ```bash
 cd <module directory>
 php scripts/build.php
 ```
 
-Or from the setup page, if the server allows it: **CyphtWebmail → Module setup
-→ Generate**. The page checks first and shows the shell command instead of the
-button when the webserver cannot run builds.
+Or press **Generate** on the setup page. Either route pulls the Composer
+dependencies too, so there is no separate `composer install` step.
 
-Both routes do the same work. See
-[Setup and first build](#setup-and-first-build) for what the steps are and when
-to repeat them.
+[Setup and first build](#setup-and-first-build) covers what the build does and
+when to run it again.
 
 ## Setup and first build
 
@@ -129,8 +121,7 @@ This is where everything is configured and built. It has:
 
 ### Press Generate
 
-Cypht is not usable as shipped; it has to be compiled. Generate runs three
-steps and streams the log:
+Generate runs three steps and streams the log:
 
 1. `composer install` - fetches/updates Cypht
 2. `vendor/jason-munro/cypht/scripts/config_gen.php` - Cypht compiles its
@@ -142,7 +133,7 @@ steps and streams the log:
 Before step 2 the module also writes Cypht's `.env` from Dolibarr's settings,
 bridges the flat Composer layout, and installs its own Cypht module sets.
 
-**You must press Generate after:**
+**Build again after:**
 
 - installing or updating the module
 - changing anything on the setup page
@@ -151,14 +142,9 @@ bridges the flat Composer layout, and installs its own Cypht module sets.
 
 ### Building from the command line
 
-`scripts/build.php` does everything the Generate button does, without a browser.
-Use it when `proc_open()` is disabled for the webserver, when the setup page
-shows the shell command instead of the button, or from a deploy script.
-
-```bash
-cd <dolibarr>/htdocs/custom/cyphtWebmail
-php scripts/build.php
-```
+`php scripts/build.php` does the same three steps without a browser. When the
+webserver cannot build, the setup page shows this command in place of the
+button.
 
 | Option | What it does |
 |---|---|
@@ -190,13 +176,9 @@ To package the module, stop before anything is compiled:
 php scripts/build.php --prepare      # then zip
 ```
 
-`--prepare` ends before `.env` and `public/` exist, so the archive ships
-`vendor/` and the Cypht module sets and nothing sensitive. The target machine
-then needs neither Composer nor network access, just:
-
-```bash
-php scripts/build.php
-```
+`--prepare` ends before `.env` and `public/` exist, so the archive carries
+`vendor/` and the Cypht module sets and nothing sensitive. Whoever unpacks it
+runs a normal build, needing neither Composer nor network access.
 
 If you already zipped a built tree, delete `vendor/jason-munro/cypht/.env` and
 `public/` from the archive before it goes anywhere.
@@ -278,11 +260,11 @@ A crashed build left `documents/cyphtWebmail/build.lock` behind. It is ignored
 automatically after 420 seconds, or delete it.
 
 **Menu entries or permissions did not change.**
-Deactivate and reactivate the module. They are written to `llx_menu` on
-activation only.
+Deactivate and reactivate; see
+[Reactivate after descriptor changes](#reactivate-after-descriptor-changes).
 
 **Changes under `cypht/modules/` have no effect.**
-Press Generate. Those files are copied into Cypht at build time.
+Build again. Those files are copied into Cypht at build time.
 
 **Contacts do not appear.**
 Open `bridge/contacts.php` directly in a browser - it should answer
