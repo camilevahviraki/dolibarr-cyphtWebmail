@@ -89,6 +89,10 @@ composer install
 This pulls `jason-munro/cypht` into `vendor/`. You can skip this step if
 Composer is reachable by the webserver - the build does it for you.
 
+If you received the module as an archive it may already contain `vendor/`. If it
+also contains `public/`, it was packaged wrongly; see
+[Build where it will run](#build-where-it-will-run).
+
 ### 3. Enable the module
 
 **Home → Setup → Modules/Applications → Interfaces**, find **CyphtWebmail**,
@@ -133,6 +137,58 @@ bridges the flat Composer layout, and installs its own Cypht module sets.
 - changing anything on the setup page
 - editing anything under `cypht/modules/`
 - running `composer update`
+
+### Building from the command line
+
+`scripts/build.php` does everything the Generate button does, without a browser.
+Use it when `proc_open()` is disabled for the webserver, when the setup page
+shows the shell command instead of the button, or from a deploy script.
+
+```bash
+cd <dolibarr>/htdocs/custom/cyphtWebmail
+php scripts/build.php
+```
+
+| Option | What it does |
+|---|---|
+| `--prepare` | dependencies and module sets only, no Dolibarr needed. For packaging |
+| `--dolibarr=PATH` | where Dolibarr lives, if this module sits outside its tree. Takes the `htdocs` folder, the install root, or `master.inc.php` itself |
+| `--owner=USER` / `--group=GROUP` | chown/chgrp the writable paths afterwards (POSIX only) |
+| `--skip-permissions` | leave ownership and modes alone |
+| `--quiet` | errors and the final result only |
+
+Run it as the webserver user, or pass `--owner`. A build run as yourself leaves
+files the webserver cannot write, and that fails later, far from the cause.
+
+### Build where it will run
+
+A compiled build belongs to the machine that made it. `config_gen.php` writes
+absolute paths into `public/index.php` and `config/dynamic.php`, so a build
+copied to another machine, or to a different path on the same one, will not
+start.
+
+**Never distribute a folder that has been fully built.** A completed build
+leaves `vendor/jason-munro/cypht/.env` behind, holding the database credentials
+and `CYPHTWEBMAIL_CONFIG_SECRET`, the key that decrypts every user's stored
+mailbox passwords. `.gitignore` keeps `vendor/` and `public/` out of git, but a
+zip or a `cp -r` does not read `.gitignore`.
+
+To package the module, stop before anything is compiled:
+
+```bash
+php scripts/build.php --prepare      # then zip
+```
+
+`--prepare` ends before `.env` and `public/` exist, so the archive ships
+`vendor/` and the Cypht module sets and nothing sensitive. The target machine
+then needs neither Composer nor network access, just:
+
+```bash
+php scripts/build.php
+```
+
+If you already zipped a built tree, delete `vendor/jason-munro/cypht/.env` and
+`public/` from the archive before it goes anywhere.
 
 ### Reactivate after descriptor changes
 
