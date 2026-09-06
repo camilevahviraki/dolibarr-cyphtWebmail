@@ -149,6 +149,11 @@ class CyphtEnvironment
 			return false;
 		}
 
+		if (!self::writeConfigTo($this->paths->getCyphtPath(), $error)) {
+			$this->error = $error;
+			return false;
+		}
+
 		return true;
 	}
 
@@ -198,6 +203,55 @@ class CyphtEnvironment
 		$result = file_put_contents($envFile, implode("\n", $lines) . "\n");
 		if ($result === false) {
 			$error = 'Could not write ' . $envFile . ' (permissions?)';
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Pin the settings that decide auth, the session and the module set.
+	 *
+	 * config/app.php resolves all six through env(), which is getenv() only,
+	 * so a correct .env on disk does not guarantee they arrive. When they do
+	 * not, app.php falls back to upstream's defaults: auth_type DB and a
+	 * module list without 'site'. Custom_Auth, Custom_Session and
+	 * Custom_User_Config are declared in modules/site/lib.php, which is only
+	 * required when 'site' is in that list.
+	 *
+	 * merge_config_files() globs config/*.php and array_merges in glob order,
+	 * so this file lands after app.php and wins.
+	 *
+	 * @param string $cyphtPath Cypht root inside vendor/
+	 * @param string $error Set on failure
+	 * @return bool True on success
+	 */
+	public static function writeConfigTo($cyphtPath, &$error = '')
+	{
+		$defaults = self::buildTimeDefaults();
+
+		$config = array(
+			'modules' => explode(',', $defaults['CYPHT_MODULES']),
+			'auth_type' => $defaults['AUTH_TYPE'],
+			'auth_class' => 'Custom_Auth',
+			'session_type' => $defaults['SESSION_TYPE'],
+			'session_class' => 'Custom_Session',
+			'user_config_type' => $defaults['USER_CONFIG_TYPE'],
+		);
+
+		$dir = $cyphtPath . '/config';
+		if (!is_dir($dir)) {
+			$error = 'No config directory in ' . $cyphtPath;
+			return false;
+		}
+
+		/* Sorts after app.php, which is what makes it win. */
+		$file = $dir . '/zz_dolibarr.php';
+		$body = "<?php\n\n/* Written by the cyphtwebmail build. Do not edit. */\n\nreturn "
+			. var_export($config, true) . ";\n";
+
+		if (file_put_contents($file, $body) === false) {
+			$error = 'Could not write ' . $file . ' (permissions?)';
 			return false;
 		}
 

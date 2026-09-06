@@ -378,7 +378,11 @@ if ($masterIncPath === '') {
 		fwrite(STDERR, $envError."\n");
 		exit(1);
 	}
-	cyphtSay("wrote build defaults to vendor/jason-munro/cypht/.env\n", $options['quiet']);
+	if (!CyphtEnvironment::writeConfigTo($paths->getCyphtPath(), $envError)) {
+		fwrite(STDERR, $envError."\n");
+		exit(1);
+	}
+	cyphtSay("wrote build defaults to vendor/jason-munro/cypht/.env and config/zz_dolibarr.php\n", $options['quiet']);
 
 	$offline = new CyphtPipeline(null, $paths, null, $vendorLayout, null, $patches, $installer);
 

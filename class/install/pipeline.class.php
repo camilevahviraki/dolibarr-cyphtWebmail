@@ -852,7 +852,12 @@ class CyphtPipeline
 			$emit($this->error . "\n", 'err');
 			return array('success' => false, 'output' => $log, 'error' => $this->error);
 		}
-		$emit("wrote build defaults to .env; this installation's values are read at runtime.\n");
+		if (!CyphtEnvironment::writeConfigTo($this->paths->getCyphtPath(), $envError)) {
+			$this->error = $envError;
+			$emit($this->error . "\n", 'err');
+			return array('success' => false, 'output' => $log, 'error' => $this->error);
+		}
+		$emit("wrote build defaults to .env and config/zz_dolibarr.php; this installation's values are read at runtime.\n");
 
 		if (!$this->vendorBridge->ensureCyphtVendorBridge()) {
 			$this->error = $this->vendorBridge->error;
