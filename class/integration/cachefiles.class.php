@@ -45,10 +45,39 @@ class CyphtCacheFiles
 	/**
 	 * @param string $dir   Cache directory, DOLIBARR_CACHE_DIR
 	 * @param string $login
+	 * @param string $kind  'contacts', 'mail-templates'
 	 * @return string
 	 */
-	public static function contactsFile($dir, $login)
+	public static function fileFor($dir, $login, $kind)
 	{
-		return rtrim((string) $dir, '/\\') . '/' . self::key($login) . '-contacts.json';
+		return rtrim((string) $dir, '/\\') . '/' . self::key($login) . '-' . $kind . '.json';
+	}
+
+	/**
+	 * Decode one cache file, for the Cypht half.
+	 *
+	 * @param string $dir
+	 * @param string $login
+	 * @param string $kind
+	 * @param string $expect Key the payload must carry
+	 * @return array<string,mixed>|false
+	 */
+	public static function read($dir, $login, $kind, $expect)
+	{
+		if ((string) $dir === '') {
+			return false;
+		}
+
+		$file = self::fileFor($dir, $login, $kind);
+		if (!is_readable($file)) {
+			return false;
+		}
+
+		$data = json_decode((string) @file_get_contents($file), true);
+		if (!is_array($data) || !isset($data[$expect]) || !is_array($data[$expect])) {
+			return false;
+		}
+
+		return $data;
 	}
 }
