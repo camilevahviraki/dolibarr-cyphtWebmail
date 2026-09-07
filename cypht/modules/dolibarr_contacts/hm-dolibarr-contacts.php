@@ -47,14 +47,6 @@ class Hm_Dolibarr_Contacts {
     /**
      * The list Dolibarr published in the data directory.
      *
-     * This class runs inside the Cypht app, which is a separate application
-     * from Dolibarr with no $db, no $user and none of its functions. It gets
-     * Dolibarr data either from a file Dolibarr wrote in advance, which is
-     * this method, or by asking bridge/contacts.php over HTTP, which is
-     * fetch() below. The file is preferred: an HTTP call needs the server to
-     * reach its own public URL, which fails behind an auth proxy, an IP
-     * allow list or an egress firewall.
-     *
      * DOLIBARR_CACHE_DIR and DOLIBARR_MODULE_ROOT are both exported by
      * CyphtEnvBootstrap; the second is what lets this side load the naming
      * rules the writer uses, rather than restating them.
@@ -63,31 +55,9 @@ class Hm_Dolibarr_Contacts {
      * @return array|false
      */
     private function fromCache($login) {
-        $dir = Hm_Environment::get('DOLIBARR_CACHE_DIR', '');
-        if ($dir === '') {
-            return false;
-        }
+        $data = Hm_Dolibarr_Cache::read('contacts', $login, 'contacts');
 
-        $naming = Hm_Environment::get('DOLIBARR_MODULE_ROOT', '').'/class/integration/cachefiles.class.php';
-        if (!is_readable($naming)) {
-            Hm_Debug::add('dolibarr_contacts: cannot load '.$naming);
-            return false;
-        }
-        require_once $naming;
-
-        $file = CyphtCacheFiles::contactsFile($dir, $login);
-        if (!is_readable($file)) {
-            Hm_Debug::add('dolibarr_contacts: no cache file at '.$file);
-            return false;
-        }
-
-        $data = json_decode((string) @file_get_contents($file), true);
-        if (!is_array($data) || !isset($data['contacts']) || !is_array($data['contacts'])) {
-            Hm_Debug::add('dolibarr_contacts: cache file unreadable or malformed');
-            return false;
-        }
-
-        return $data['contacts'];
+        return ($data === false) ? false : $data['contacts'];
     }
 
     /**
