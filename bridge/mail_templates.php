@@ -25,9 +25,16 @@
  *              control, not a filter.
  */
 
-// This is a machine-to-machine JSON endpoint: no session, no menus, no CSRF.
-if (!defined('NOLOGIN')) {
-	define('NOLOGIN', '1');
+/* Two callers, two ways in. The browser reaches this from the webmail
+ * iframe, same origin as Dolibarr, so it carries the user's session cookie
+ * and main.inc.php authenticates it. A server-to-server caller has no
+ * cookie and signs an HMAC instead, and NOLOGIN keeps main.inc.php from
+ * answering it with a login form. The choice has to be made here, before
+ * main.inc.php loads. */
+if (!empty($_GET['token']) || !empty($_POST['token'])) {
+	if (!defined('NOLOGIN')) {
+		define('NOLOGIN', '1');
+	}
 }
 if (!defined('NOCSRFCHECK')) {
 	define('NOCSRFCHECK', '1');
@@ -100,50 +107,27 @@ if (!isModEnabled('cyphtwebmail')) {
 $login = GETPOST('login', 'aZ09arobase');
 $token = GETPOST('token', 'aZ09');
 
-if ($login === '' || $token === '') {
-	cyphtMailTemplatesRespond(400, array('error' => 'Missing login or token'));
-}
 
 // ---------------------------------------------------------------------
 
-require_once __DIR__.'/../class/install/config.class.php';
-// Not llx_const: dolibarr_set_const() encrypts anything whose name ends
-// in _SECRET, and the webmail reads its copy over raw PDO before
-// Dolibarr is loaded, so the two ends would sign with different values.
-$secret = CyphtConfig::get($db, 'SSO_SHARED_SECRET', '');
-if ($secret === '') {
-	cyphtMailTemplatesRespond(503, array('error' => 'SSO secret not initialised, run the module build first'));
+require_once __DIR__.'/../class/integration/bridgeauth.class.php';
+
+if ($token === '') {
+	/* Session mode: main.inc.php has already authenticated. */
+	global $user;
+	if (empty($user->id)) {
+		cyphtMailTemplatesRespond(403, array('error' => 'Not signed in'));
+	}
+	$bridgeUser = $user;
+} else {
+	$authStatus = 403;
+	$authError = '';
+	$bridgeUser = CyphtBridgeAuth::userFromToken($db, $login, $token, 'templates', $authStatus, $authError);
+	if ($bridgeUser === null) {
+		cyphtMailTemplatesRespond($authStatus, array('error' => $authError));
+	}
 }
 
-if (strpos($token, '.') === false) {
-	cyphtMailTemplatesRespond(403, array('error' => 'Malformed token'));
-}
-
-list($timestamp, $signature) = explode('.', $token, 2);
-if (!ctype_digit($timestamp)) {
-	cyphtMailTemplatesRespond(403, array('error' => 'Malformed token'));
-}
-
-if (abs(time() - (int) $timestamp) > 60) {
-	cyphtMailTemplatesRespond(403, array('error' => 'Token expired'));
-}
-
-// Own purpose tag, so a contacts token cannot be replayed against this
-// endpoint and vice versa.
-$expected = hash_hmac('sha256', $login.'|'.$timestamp.'|templates', $secret);
-if (!hash_equals($expected, $signature)) {
-	cyphtMailTemplatesRespond(403, array('error' => 'Bad signature'));
-}
-
-// ---------------------------------------------------------------------
-
-$bridgeUser = new User($db);
-if ($bridgeUser->fetch(0, $login) <= 0) {
-	cyphtMailTemplatesRespond(403, array('error' => 'Unknown user'));
-}
-if (isset($bridgeUser->statut) && $bridgeUser->statut == 0) {
-	cyphtMailTemplatesRespond(403, array('error' => 'Disabled user'));
-}
 $bridgeUser->loadRights();
 
 // NOLOGIN leaves $conf->entity at its default; realign it with the user so
