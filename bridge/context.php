@@ -21,9 +21,21 @@
  *              them, for the message view in Cypht.
  */
 
-// This is a machine-to-machine JSON endpoint: no session, no menus, no CSRF.
-if (!defined('NOLOGIN')) {
-	define('NOLOGIN', '1');
+/* Two callers, two ways in.
+ *
+ * The browser reaches this from the webmail iframe, which is the same origin
+ * as Dolibarr, so it arrives with the user's session cookie and whatever else
+ * the site puts in front of Dolibarr. Nothing is signed and NOLOGIN must stay
+ * off, so main.inc.php authenticates and $user is the real one.
+ *
+ * A server-to-server caller has no cookie, so it signs an HMAC instead and
+ * NOLOGIN keeps main.inc.php from redirecting it to a login form.
+ *
+ * Deciding on the token has to happen here, before main.inc.php is loaded. */
+if (!empty($_GET['token']) || !empty($_POST['token'])) {
+	if (!defined('NOLOGIN')) {
+		define('NOLOGIN', '1');
+	}
 }
 if (!defined('NOCSRFCHECK')) {
 	define('NOCSRFCHECK', '1');
@@ -98,51 +110,30 @@ $login = GETPOST('login', 'aZ09arobase');
 $token = GETPOST('token', 'aZ09');
 $email = trim(GETPOST('email', 'nohtml'));
 
-if ($login === '' || $token === '') {
-	cyphtContextRespond(400, array('error' => 'Missing login or token'));
-}
-
 if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 	cyphtContextRespond(400, array('error' => 'Missing or malformed email'));
 }
 
-// --- 1. Token ---------------------------------------------------------
+// --- 1. Who is asking -------------------------------------------------
 
-require_once __DIR__.'/../class/install/config.class.php';
-$secret = CyphtConfig::get($db, 'SSO_SHARED_SECRET', '');
-if ($secret === '') {
-	cyphtContextRespond(503, array('error' => 'SSO secret not initialised, run the module build first'));
+require_once __DIR__.'/../class/integration/bridgeauth.class.php';
+
+if ($token === '') {
+	/* Session mode: main.inc.php has already authenticated. */
+	global $user;
+	if (empty($user->id)) {
+		cyphtContextRespond(403, array('error' => 'Not signed in'));
+	}
+	$bridgeUser = $user;
+} else {
+	$authStatus = 403;
+	$authError = '';
+	$bridgeUser = CyphtBridgeAuth::userFromToken($db, $login, $token, 'context', $authStatus, $authError);
+	if ($bridgeUser === null) {
+		cyphtContextRespond($authStatus, array('error' => $authError));
+	}
 }
 
-if (strpos($token, '.') === false) {
-	cyphtContextRespond(403, array('error' => 'Malformed token'));
-}
-
-list($timestamp, $signature) = explode('.', $token, 2);
-if (!ctype_digit($timestamp)) {
-	cyphtContextRespond(403, array('error' => 'Malformed token'));
-}
-
-// Same 60s anti-replay window as Custom_Auth::check_credentials().
-if (abs(time() - (int) $timestamp) > 60) {
-	cyphtContextRespond(403, array('error' => 'Token expired'));
-}
-
-// Purpose tag stops a token for another endpoint being replayed here.
-$expected = hash_hmac('sha256', $login.'|'.$timestamp.'|context', $secret);
-if (!hash_equals($expected, $signature)) {
-	cyphtContextRespond(403, array('error' => 'Bad signature'));
-}
-
-// --- 2. User ----------------------------------------------------------
-
-$bridgeUser = new User($db);
-if ($bridgeUser->fetch(0, $login) <= 0) {
-	cyphtContextRespond(403, array('error' => 'Unknown user'));
-}
-if (isset($bridgeUser->statut) && $bridgeUser->statut == 0) {
-	cyphtContextRespond(403, array('error' => 'Disabled user'));
-}
 $bridgeUser->loadRights();
 
 // NOLOGIN leaves $conf->entity at its default; realign it with the user.
