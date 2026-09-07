@@ -21,9 +21,16 @@
  *              THE FIRST WRITE ENDPOINT. Everything under bridge/ before this
  */
 
-// This is a machine-to-machine JSON endpoint: no session, no menus, no CSRF.
-if (!defined('NOLOGIN')) {
-	define('NOLOGIN', '1');
+/* Two callers, two ways in. The browser reaches this from the webmail
+ * iframe, same origin as Dolibarr, so it carries the user's session cookie
+ * and main.inc.php authenticates it. A server-to-server caller has no
+ * cookie and signs an HMAC instead, and NOLOGIN keeps main.inc.php from
+ * answering it with a login form. The choice has to be made here, before
+ * main.inc.php loads. */
+if (!empty($_GET['token']) || !empty($_POST['token'])) {
+	if (!defined('NOLOGIN')) {
+		define('NOLOGIN', '1');
+	}
 }
 if (!defined('NOCSRFCHECK')) {
 	define('NOCSRFCHECK', '1');
@@ -119,9 +126,6 @@ $token = GETPOST('token', 'aZ09');
 $email = trim(GETPOST('email', 'nohtml'));
 $name = trim(GETPOST('name', 'alphanohtml'));
 
-if ($login === '' || $token === '') {
-	cyphtCreateRespond(400, array('error' => 'Missing login or token'));
-}
 
 if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 	cyphtCreateRespond(400, array('error' => 'Missing or malformed email'));
@@ -129,40 +133,24 @@ if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 
 // --- 1. Token ---------------------------------------------------------
 
-require_once __DIR__.'/../class/install/config.class.php';
-$secret = CyphtConfig::get($db, 'SSO_SHARED_SECRET', '');
-if ($secret === '') {
-	cyphtCreateRespond(503, array('error' => 'SSO secret not initialised, run the module build first'));
+require_once __DIR__.'/../class/integration/bridgeauth.class.php';
+
+if ($token === '') {
+	/* Session mode: main.inc.php has already authenticated. */
+	global $user;
+	if (empty($user->id)) {
+		cyphtCreateRespond(403, array('error' => 'Not signed in'));
+	}
+	$bridgeUser = $user;
+} else {
+	$authStatus = 403;
+	$authError = '';
+	$bridgeUser = CyphtBridgeAuth::userFromToken($db, $login, $token, 'create', $authStatus, $authError);
+	if ($bridgeUser === null) {
+		cyphtCreateRespond($authStatus, array('error' => $authError));
+	}
 }
 
-if (strpos($token, '.') === false) {
-	cyphtCreateRespond(403, array('error' => 'Malformed token'));
-}
-
-list($timestamp, $signature) = explode('.', $token, 2);
-if (!ctype_digit($timestamp)) {
-	cyphtCreateRespond(403, array('error' => 'Malformed token'));
-}
-
-if (abs(time() - (int) $timestamp) > 60) {
-	cyphtCreateRespond(403, array('error' => 'Token expired'));
-}
-
-// Purpose tag stops a read token being replayed against this write.
-$expected = hash_hmac('sha256', $login.'|'.$timestamp.'|create', $secret);
-if (!hash_equals($expected, $signature)) {
-	cyphtCreateRespond(403, array('error' => 'Bad signature'));
-}
-
-// --- 2. User ----------------------------------------------------------
-
-$bridgeUser = new User($db);
-if ($bridgeUser->fetch(0, $login) <= 0) {
-	cyphtCreateRespond(403, array('error' => 'Unknown user'));
-}
-if (isset($bridgeUser->statut) && $bridgeUser->statut == 0) {
-	cyphtCreateRespond(403, array('error' => 'Disabled user'));
-}
 $bridgeUser->loadRights();
 
 $conf->entity = ($bridgeUser->entity > 0 ? $bridgeUser->entity : 1);
