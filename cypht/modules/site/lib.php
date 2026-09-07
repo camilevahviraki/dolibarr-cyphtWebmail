@@ -65,17 +65,6 @@ class Custom_Session extends Hm_Session {
     /**
      * Delete abandoned session files.
      *
-     * Nothing else ever removes one: destroy() unlinks on an explicit logout,
-     * and closing the tab (what most people do) leaves the file behind
-     * forever. Measured at ~4.8 new files per user per day, so a 1000-user
-     * site adds ~4,800 files a day to one flat directory. The disk cost is
-     * trivial; the file count is not, and every request does fopen()/flock()
-     * in that same directory.
-     *
-     * Probabilistic rather than scheduled, mirroring PHP's own
-     * session.gc_probability: no cron to install, and the cost lands on one
-     * request in SESSION_GC_DIVISOR instead of all of them.
-     *
      * @return void
      */
     private function gc() {
@@ -96,9 +85,6 @@ class Custom_Session extends Hm_Session {
         }
 
         foreach ($files as $file) {
-            // mtime, not ctime: start() rewrites the file on every request,
-            // so an in-use session keeps refreshing its own timestamp and is
-            // never a candidate here.
             $mtime = @filemtime($file);
             if ($mtime !== false && $mtime < $cutoff) {
                 @unlink($file);
@@ -115,9 +101,7 @@ class Custom_Session extends Hm_Session {
                 $this->data = [];
                 $this->active = true;
                 $this->dbg('NEW LOGIN established');
-                // Runs on login rather than on every request: this is the
-                // moment a new file is about to be created, so it is the
-                // right point to clear the ones nobody came back for.
+
                 $this->gc();
                 if ($fingerprint) {
                     $this->set_fingerprint($request);
@@ -156,10 +140,7 @@ class Custom_Session extends Hm_Session {
             $this->dbg('start(): file not readable, marking inactive');
             return;
         }
-        // Locked read: Cypht fires several parallel AJAX calls on page
-        // load, each reading/writing this same file. Without a lock, a
-        // read racing an in-progress write returns a partial file, fails
-        // to decrypt, and reports the session inactive.
+
         $fh = @fopen($file, 'rb');
         if ($fh === false) {
             $this->active = false;
@@ -219,12 +200,6 @@ class Custom_Session extends Hm_Session {
 
     /**
      * Persists and closes the session early, before a slow operation
-     * (e.g. testing IMAP/SMTP credentials) so the file lock isn't held.
-     * Every stock Cypht session backend implements this; Hm_Session
-     * itself does not provide a default, so leaving it unimplemented
-     * here caused a fatal "Call to undefined method close_early()"
-     * (uncaught Error, raw 503) in modules like nux's "Add an E-mail
-     * Account".
      */
     public function close_early() {
         if ($this->active && !$this->session_closed) {
@@ -296,14 +271,6 @@ class Custom_Auth extends Hm_Auth_DB {
  * Replaces Hm_User_Config_File as the user-settings backend (via
  * USER_CONFIG_TYPE=custom:Custom_User_Config in .env).
  *
- * Hm_User_Config_File encrypts settings using the load()/save() "password"
- * as the literal key. Our SSO login passes a fresh per-request HMAC token
- * as that password, a different key every page load, so nothing saved
- * under one request's key could ever be decrypted the next. This class
- * ignores the key and stores plain JSON instead, same fix Tiki's
- * integration uses (Tiki_Hm_User_Config). Dolibarr's own auth already
- * gates access to this page, so there's no secret being protected anyway.
- *
  * @package modules
  * @subpackage site
  */
@@ -340,14 +307,6 @@ class Custom_User_Config extends Hm_Config {
 
     /**
      * Settings file for a user.
-     *
-     * The readable part is sanitised for the filesystem, but sanitising alone
-     * is not safe as an identity: Dolibarr does not restrict login characters
-     * (User::create() only rejects an empty login), so "jean dupont" and
-     * "jean_dupont" both collapse to the same string and would then share one
-     * file, and with it each other's mail accounts and passwords. The hash of
-     * the untouched login is what actually makes the name unique; the prefix
-     * is only there so a human can tell whose file it is.
      *
      * @param string $username
      * @return string
@@ -389,11 +348,6 @@ class Custom_User_Config extends Hm_Config {
         $str_data = $this->db_load($username);
 
         if ($str_data === false) {
-            // Nothing in the database yet. Either a new user, or one whose
-            // settings still live in the pre-database file: read it, and let
-            // the next save() land it in the table. The file is removed by
-            // migrate_file_away() once that has happened, so this path runs
-            // at most once per user.
             $str_data = $this->file_load($username);
             if ($str_data !== false) {
                 $this->migrated_from_file = true;
@@ -529,8 +483,6 @@ class Custom_User_Config extends Hm_Config {
      * @return string JSON
      */
     private function decrypt_payload($raw, $username) {
-        // Current format is plain JSON with only the passwords encrypted, so
-        // anything starting with { needs no unwrapping.
         if (substr(ltrim($raw), 0, 1) === '{') {
             return $raw;
         }
@@ -540,8 +492,6 @@ class Custom_User_Config extends Hm_Config {
             return $raw;
         }
 
-        // Older rows and files wrapped the whole blob. Unwrap them once; the
-        // next save rewrites in the current format.
         $decrypted = Hm_Crypt::plaintext($raw, $secret);
         if ($decrypted !== false) {
             Hm_Debug::add('cyphtWebmail: converting whole-blob encrypted config for '.$username);
@@ -674,11 +624,6 @@ class Custom_User_Config extends Hm_Config {
             return;
         }
 
-        // Deferred, not written here. Hm_Handler_load_user_data calls reload()
-        // on every page load, so doing the read-compare-write inline meant a
-        // decrypt plus a probable encrypt+rewrite on every single request.
-        // Marking dirty routes it through the same end-of-request flush as
-        // set(), so a request writes at most once whatever happens during it.
         $this->dirty = true;
         if (!$this->flush_registered) {
             $this->flush_registered = true;
@@ -692,10 +637,6 @@ class Custom_User_Config extends Hm_Config {
      * Strip values that change every request but carry no meaning once
      * reloaded, so comparing two configs answers "did anything the user cares
      * about change" rather than "is this a different request".
-     *
-     * 'object' is a live connection handle and 'connected' a socket state;
-     * without dropping them, any request that opened an IMAP connection looks
-     * different from the stored copy and triggers a pointless rewrite.
      *
      * @param array $config
      * @return string Canonical form, safe to compare with ===
@@ -720,13 +661,6 @@ class Custom_User_Config extends Hm_Config {
     /**
      * Persist on every single write.
      *
-     * Upstream leaves persistence to the Save page, which cannot succeed
-     * here: save_user_settings() re-checks the password through
-     * Custom_Auth, and that only accepts a 60 second HMAC token no user can
-     * type. Settings and mail accounts therefore only ever lived in the
-     * session and died with it. Tiki's integration hit the same wall and
-     * resolved it the same way (Tiki_Hm_User_Config::set).
-     *
      * @param string $name config value name
      * @param mixed $value config value
      */
@@ -737,16 +671,6 @@ class Custom_User_Config extends Hm_Config {
             return;
         }
 
-        // Coalesced rather than written straight through. Tiki saves inside
-        // set(), but Hm_Handler_save_user_settings loops set() over every
-        // changed setting, so that rewrites the whole file once per setting -
-        // thirty-odd full writes for one visit to the settings page. Tiki
-        // guards this with a 'skip_saving_on_set' flag, but that key exists
-        // nowhere in upstream Cypht, so nothing ever sets it.
-        //
-        // Deferring is safe because save() only touches disk; every reader in
-        // the request works off $this->config in memory, which is already
-        // current.
         $this->dirty = true;
         if (!$this->flush_registered) {
             $this->flush_registered = true;
@@ -764,16 +688,9 @@ class Custom_User_Config extends Hm_Config {
         }
         $this->dirty = false;
 
-        // Everything here runs after the response has been sent, so anything
-        // that leaks out - a PHP warning, a PDO notice, a stray echo - lands
-        // on the end of an already-complete AJAX payload and Cypht reports
-        // "Server Error" for a request that actually succeeded. The retry
-        // then finds nothing dirty, skips this, and appears to work, which
-        // is exactly the every-other-click symptom. Nothing escapes.
         ob_start();
         try {
-            // Reuses $this->dbh rather than constructing another config
-            // object, which would open a second connection during shutdown.
+            // Reuses $this->dbh
             $raw = $this->db_load($this->username);
             $existing = ($raw === false || $raw === '') ? array() : $this->decode($raw);
             if (!is_array($existing)) {
@@ -786,8 +703,6 @@ class Custom_User_Config extends Hm_Config {
                 return; // nothing meaningful changed, skip the write entirely
             }
 
-            // Last write wins on the updated_at stamp, so a stale second tab
-            // cannot overwrite newer settings with what it loaded minutes ago.
             if (!empty($existing['updated_at']) && !empty($this->config['updated_at'])
                 && $existing['updated_at'] > $this->config['updated_at']) {
                 ob_end_clean();
@@ -817,9 +732,7 @@ class Custom_User_Config extends Hm_Config {
         $this->config['updated_at'] = microtime(true);
         ksort($this->config);
 
-        // Readable JSON with only the passwords encrypted. This is the single
-        // store for accounts and settings, so keeping the rest queryable is
-        // what lets anything outside Cypht report on it.
+        // Readable JSON with only the passwords encrypted. This is the single store for accounts and settings
         $payload = json_encode($this->encrypt_passwords($this->config));
 
         if ($this->db_save($username, $payload)) {
@@ -831,12 +744,6 @@ class Custom_User_Config extends Hm_Config {
 
     /**
      * Upsert the config row.
-     *
-     * Update first, insert only if nothing was updated, rather than MySQL's
-     * ON DUPLICATE KEY UPDATE: this has to work on PostgreSQL too, and
-     * Dolibarr supports both. The unique key on (entity, fk_user) is what
-     * makes the race between the two statements harmless - a concurrent
-     * insert loses, and the next save writes the same data anyway.
      *
      * @param string $username
      * @param string $payload Encrypted config
@@ -854,17 +761,6 @@ class Custom_User_Config extends Hm_Config {
             return false;
         }
 
-        // Type passed explicitly: Hm_DB::execute() infers it from the first
-        // character of the query and only recognises lower case, so an
-        // uppercase UPDATE would be treated as a select and never report a
-        // row count.
-        /* Stamped on every write so a future Cypht that changes the shape of
-         * this blob can be migrated rather than guessed at.
-         *
-         * Not Cypht's VERSION constant: that is its internal framework number,
-         * 0.1, and stamping it would record the same meaningless value on
-         * every row. The release version comes from build.json, which the
-         * build writes and the runtime bootstrap publishes. */
         $cyphtVersion = Hm_Environment::get('CYPHT_VERSION', '');
         $cyphtVersion = ($cyphtVersion !== '') ? (string) $cyphtVersion : null;
 
@@ -919,5 +815,41 @@ class Custom_User_Config extends Hm_Config {
         }
 
         return parent::filter_servers();
+    }
+}
+
+/**
+ * Reads the files Dolibarr publishes under DOLIBARR_CACHE_DIR.
+ *
+ * @subpackage site/lib
+ */
+class Hm_Dolibarr_Cache {
+
+    /**
+     * @param string $kind   'contacts', 'mail-templates'
+     * @param string $login  Dolibarr login
+     * @param string $expect Key the payload must carry
+     * @return array|false
+     */
+    public static function read($kind, $login, $expect) {
+        $dir = Hm_Environment::get('DOLIBARR_CACHE_DIR', '');
+        $root = Hm_Environment::get('DOLIBARR_MODULE_ROOT', '');
+        if ($dir === '' || $root === '') {
+            return false;
+        }
+
+        $naming = $root.'/class/integration/cachefiles.class.php';
+        if (!is_readable($naming)) {
+            Hm_Debug::add('dolibarr cache: cannot load '.$naming);
+            return false;
+        }
+        require_once $naming;
+
+        $data = CyphtCacheFiles::read($dir, $login, $kind, $expect);
+        if ($data === false) {
+            Hm_Debug::add('dolibarr cache: no usable '.$kind.' file for '.$login);
+        }
+
+        return $data;
     }
 }
