@@ -3,6 +3,14 @@
 /* Dolibarr card on the From row of an open message. */
 
 /* Last card drawn, so a message rendered twice does not fetch twice. */
+/* The bridges sit beside public/, which is what this page is served from.
+ * A relative URL keeps them same-origin whatever the site is called, so
+ * nothing has to be configured and nothing has to be reachable from the
+ * server itself. */
+var dolibarr_context_bridge = function(name) {
+    return '../bridge/' + name + '.php';
+};
+
 var dolibarr_context_state = {
     email: null,
     data: null,
@@ -394,16 +402,32 @@ var dolibarr_context_do_create = function(root, strings, modal, name) {
     dolibarr_context_create_btn_state(modal, true, strings);
     dolibarr_context_note(root, strings.addWorking);
 
-    Hm_Ajax.request(
-        [{'name': 'hm_ajax_hook', 'value': 'ajax_dolibarr_context_create'},
-        {'name': 'dolibarr_context_email', 'value': email},
-        {'name': 'dolibarr_context_name', 'value': name}],
-        function(res) {
-            var status = (res && res.dolibarr_context_create_status) || 'error';
+    var form = new FormData();
+    form.append('email', email);
+    form.append('name', name);
+
+    fetch(dolibarr_context_bridge('create'), {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {'Accept': 'application/json'},
+        body: form
+    }).then(function(response) {
+        return response.json().catch(function() {
+            return {};
+        });
+    }).then(function(res) {
+            /* The bridge answers with the record it made or found; the
+             * dialog only needs to know which of the two happened. */
+            var status = 'error';
+            if (res && res.created) {
+                status = 'created';
+            } else if (res && res.existing) {
+                status = 'existing';
+            }
 
             if (status !== 'created' && status !== 'existing') {
                 /* Kept in the dialog: the refusal belongs beside the field. */
-                var message = (res && res.dolibarr_context_create_message) || strings.addFailed;
+                var message = (res && res.error) || strings.addFailed;
                 var box = document.getElementById('dolibarr_context_add_error');
                 if (box) {
                     box.textContent = message;
@@ -422,7 +446,7 @@ var dolibarr_context_do_create = function(root, strings, modal, name) {
                 modal,
                 strings,
                 status,
-                (res && res.dolibarr_context_create_url) || '',
+                (res && res.url) || '',
                 (res && res.dolibarr_context_create_name) || name
             );
 
@@ -430,12 +454,15 @@ var dolibarr_context_do_create = function(root, strings, modal, name) {
             dolibarr_context_state = { email: null, data: null, status: '', at: 0 };
             root.removeAttribute('data-dolibarr-bound');
             dolibarr_context_init();
-        },
-        [],
-        true,
-        undefined,
-        true
-    );
+    }).catch(function() {
+        var box = document.getElementById('dolibarr_context_add_error');
+        if (box) {
+            box.textContent = strings.addFailed;
+            box.hidden = false;
+        }
+        dolibarr_context_create_btn_state(modal, false, strings);
+        dolibarr_context_offer_add(root, strings);
+    });
 };
 
 var dolibarr_context_render = function(root, strings, data, status) {
@@ -609,71 +636,58 @@ var dolibarr_context_load = function(root, strings, attempt) {
         return true;
     };
 
-    Hm_Ajax.request(
-        [{'name': 'hm_ajax_hook', 'value': 'ajax_dolibarr_context'},
-        {'name': 'dolibarr_context_email', 'value': email}],
-        function(res) {
-            if (!claim()) {
-                return;
+    /* Same origin as Dolibarr, so the browser attaches the session cookie and
+     * anything the site puts in front of it. The server never calls its own
+     * URL, which is what used to break behind an auth proxy or a firewall. */
+    fetch(dolibarr_context_bridge('context') + '?email=' + encodeURIComponent(email), {
+        credentials: 'same-origin',
+        headers: {'Accept': 'application/json'}
+    }).then(function(response) {
+        return response.json().then(function(body) {
+            return {ok: response.ok, status: response.status, body: body};
+        });
+    }).then(function(res) {
+        if (!claim()) {
+            return;
+        }
+
+        /* The message may have been closed, or another one opened, while the request was in flight. */
+        if (!document.body.contains(root)) {
+            return;
+        }
+
+        if (res.status === 403) {
+            /* Refused, not broken: nothing to show and nothing to retry. */
+            root.hidden = true;
+            return;
+        }
+
+        if (!res.ok || !res.body || typeof res.body !== 'object') {
+            dolibarr_context_recover(root, strings, attempt);
+            return;
+        }
+
+        dolibarr_context_state = {
+            email: email,
+            data: res.body,
+            status: 'ok',
+            at: Date.now()
+        };
+
+        /* A throw here would leave the loading note as the last thing written. */
+        try {
+            dolibarr_context_render(root, strings, res.body, 'ok');
+        } catch (err) {
+            if (window.console && console.error) {
+                console.error('dolibarr_context: render failed', err);
             }
-
-            /* The message may have been closed, or another one opened, while the request was in flight. */
-            if (!document.body.contains(root)) {
-                return;
-            }
-
-            /* on_failure hands us false rather than a response. */
-            if (!res) {
-                dolibarr_context_recover(root, strings, attempt);
-                return;
-            }
-
-            var status = res.dolibarr_context_status || 'error';
-
-            if (status === 'unconfigured' || status === 'forbidden') {
-                /* 'unconfigured' is a build problem, which is not something to explain on top of somebody's mail. */
-                root.hidden = true;
-                return;
-            }
-
-            if (!res.dolibarr_context_data) {
-                dolibarr_context_recover(root, strings, attempt);
-                return;
-            }
-
-            var data;
-            try {
-                data = JSON.parse(res.dolibarr_context_data);
-            } catch (err) {
-                dolibarr_context_recover(root, strings, attempt);
-                return;
-            }
-
-            dolibarr_context_state = {
-                email: email,
-                data: data,
-                status: status,
-                at: Date.now()
-            };
-
-            /* A throw here would leave the loading note as the last thing written. */
-            try {
-                dolibarr_context_render(root, strings, data, status);
-            } catch (err) {
-                if (window.console && console.error) {
-                    console.error('dolibarr_context: render failed', err);
-                }
-                dolibarr_context_recover(root, strings, 2);
-            }
-        },
-        [],
-        /* no_icon: no need to spin the application's loading indicator. */
-        true,
-        /* batch_callback: left undefined on purpose. */
-        undefined,
-        /* on_failure is a flag, not a handler: the callback gets false. */
-        true
-    );
+            dolibarr_context_recover(root, strings, 2);
+        }
+    }).catch(function() {
+        if (claim()) {
+            dolibarr_context_recover(root, strings, attempt);
+        }
+    });
 };
 
 var dolibarr_context_init = function() {
