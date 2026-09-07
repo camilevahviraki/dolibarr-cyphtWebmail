@@ -75,9 +75,17 @@ if (!$cyphtUpgrade->run()) {
  * both are present; costs a stat once the file is warm. */
 require_once __DIR__.'/class/install/paths.class.php';
 require_once __DIR__.'/class/integration/contactcache.class.php';
-$cyphtCache = new CyphtContactCache(new CyphtPaths());
-if (!$cyphtCache->refresh($db, $user)) {
-	dol_syslog('CyphtWebmail contact cache: '.$cyphtCache->error, LOG_WARNING);
+require_once __DIR__.'/class/integration/mailtemplatecache.class.php';
+$cyphtPaths = new CyphtPaths();
+
+$cyphtContactCache = new CyphtContactCache($cyphtPaths);
+if (!$cyphtContactCache->refresh($db, $user)) {
+	dol_syslog('CyphtWebmail contact cache: '.$cyphtContactCache->error, LOG_WARNING);
+}
+
+$cyphtTemplateCache = new CyphtMailTemplateCache($cyphtPaths);
+if (!$cyphtTemplateCache->refresh($db, $user, $langs)) {
+	dol_syslog('CyphtWebmail mail template cache: '.$cyphtTemplateCache->error, LOG_WARNING);
 }
 
 // Current Cypht page, carried in one opaque parameter holding Cypht's own
