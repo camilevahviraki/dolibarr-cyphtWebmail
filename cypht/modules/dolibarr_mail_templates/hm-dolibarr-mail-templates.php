@@ -55,6 +55,11 @@ class Hm_Dolibarr_Mail_Templates {
      *                     false on any transport or protocol failure
      */
     public function fetch($login) {
+        $cached = Hm_Dolibarr_Cache::read('mail-templates', $login, 'templates');
+        if ($cached !== false) {
+            return $this->shape($cached);
+        }
+
         if (!$this->configured()) {
             return false;
         }
@@ -81,11 +86,22 @@ class Hm_Dolibarr_Mail_Templates {
             return false;
         }
 
+        return $this->shape($data);
+    }
+
+    /**
+     * The picker's shape, from either source.
+     *
+     * Types come already labelled and counted, so the picker does not derive
+     * them from the template list and get the ordering or labels subtly
+     * different.
+     *
+     * @param array $data
+     * @return array
+     */
+    private function shape($data) {
         return array(
             'templates' => is_array($data['templates']) ? $data['templates'] : array(),
-            /* Distinct types, already labelled and counted by the bridge, so
-             * the picker does not have to derive them from the template list
-             * and get the ordering or the labels subtly different. */
             'types' => (array_key_exists('types', $data) && is_array($data['types'])) ? $data['types'] : array(),
             'hint' => array_key_exists('hint', $data) ? (string) $data['hint'] : '',
         );
