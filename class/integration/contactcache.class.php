@@ -15,64 +15,17 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
+require_once __DIR__ . '/filecache.class.php';
+
 /**
  * \file        class/integration/contactcache.class.php
  * \ingroup     cyphtWebmail
- * \brief       Publishes the address book for the webmail to read.
- *
- *              The module is two applications, not one. Dolibarr serves
- *              index.php and admin/; the vendored Cypht app serves public/
- *              and runs in its own request with its own bootstrap. Neither
- *              can call the other's API: Cypht has no $db, no $user and no
- *              Dolibarr functions, and loading main.inc.php inside it would
- *              collide with Cypht's own globals and session.
- *
- *              So anything Dolibarr knows has to be handed over. The two
- *              processes share one machine and one filesystem, so the
- *              cheapest channel is a file: Dolibarr writes this one while
- *              serving its own page, where $db and $user are available for
- *              free, and Cypht reads it while rendering.
- *
- *              The bridge/ endpoints do the same job over HTTP for data
- *              that cannot be known ahead of time. That works only when
- *              nothing sits in front of Dolibarr, since the server has to
- *              reach its own public URL. Prefer this route where the data
- *              can be published in advance.
+ * \brief       Publishes the address book for the webmail. See
+ *              CyphtFileCache for why this crosses on disk.
  */
-class CyphtContactCache
+class CyphtContactCache extends CyphtFileCache
 {
-	/** @var CyphtPaths */
-	private $paths;
-
-	/** @var string Set when write() returns false */
-	public $error = '';
-
-	/**
-	 * @param CyphtPaths $paths
-	 */
-	public function __construct(CyphtPaths $paths)
-	{
-		$this->paths = $paths;
-	}
-
-	/**
-	 * @return string
-	 */
-	public function dir()
-	{
-		return $this->paths->getDataDir() . '/cache';
-	}
-
-	/**
-	 * @param string $login
-	 * @return string
-	 */
-	public function fileFor($login)
-	{
-		require_once __DIR__ . '/cachefiles.class.php';
-
-		return CyphtCacheFiles::contactsFile($this->dir(), $login);
-	}
+	const KIND = 'contacts';
 
 	/**
 	 * Rewrite this user's file when it is missing or older than the TTL.
@@ -84,14 +37,10 @@ class CyphtContactCache
 	 */
 	public function refresh($db, $user, $force = false)
 	{
-		$file = $this->fileFor($user->login);
+		$file = $this->fileFor($user->login, self::KIND);
 
-		if (!$force && is_readable($file)) {
-			$ttl = getDolGlobalInt('CYPHTWEBMAIL_CONTACTS_TTL', 300);
-			$age = time() - (int) @filemtime($file);
-			if ($age >= 0 && $age < $ttl) {
-				return true;
-			}
+		if (!$force && $this->isFresh($file, getDolGlobalInt('CYPHTWEBMAIL_CONTACTS_TTL', 300))) {
+			return true;
 		}
 
 		require_once __DIR__ . '/contactcollector.class.php';
@@ -107,47 +56,5 @@ class CyphtContactCache
 		$data['written_at'] = time();
 
 		return $this->put($file, $data);
-	}
-
-	/**
-	 * Write to a temp file then rename, so the reader never sees a
-	 * half written file.
-	 *
-	 * @param string $file
-	 * @param array<string,mixed> $data
-	 * @return bool
-	 */
-	private function put($file, array $data)
-	{
-		$dir = dirname($file);
-		if (!is_dir($dir)) {
-			require_once DOL_DOCUMENT_ROOT . '/core/lib/files.lib.php';
-			dol_mkdir($dir);
-		}
-		if (!is_dir($dir)) {
-			$this->error = 'Could not create ' . $dir;
-			return false;
-		}
-
-		$json = json_encode($data);
-		if ($json === false) {
-			$this->error = 'Could not encode the contact list: ' . json_last_error_msg();
-			return false;
-		}
-
-		$tmp = $file . '.' . getmypid() . '.tmp';
-		if (@file_put_contents($tmp, $json) === false) {
-			$this->error = 'Could not write ' . $tmp;
-			return false;
-		}
-		if (!@rename($tmp, $file)) {
-			@unlink($tmp);
-			$this->error = 'Could not replace ' . $file;
-			return false;
-		}
-
-		@chmod($file, 0600);
-
-		return true;
 	}
 }
