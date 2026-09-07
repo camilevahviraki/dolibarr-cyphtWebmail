@@ -45,12 +45,63 @@ class Hm_Dolibarr_Contacts {
     }
 
     /**
+     * The list Dolibarr published in the data directory.
+     *
+     * This class runs inside the Cypht app, which is a separate application
+     * from Dolibarr with no $db, no $user and none of its functions. It gets
+     * Dolibarr data either from a file Dolibarr wrote in advance, which is
+     * this method, or by asking bridge/contacts.php over HTTP, which is
+     * fetch() below. The file is preferred: an HTTP call needs the server to
+     * reach its own public URL, which fails behind an auth proxy, an IP
+     * allow list or an egress firewall.
+     *
+     * DOLIBARR_CACHE_DIR and DOLIBARR_MODULE_ROOT are both exported by
+     * CyphtEnvBootstrap; the second is what lets this side load the naming
+     * rules the writer uses, rather than restating them.
+     *
+     * @param string $login
+     * @return array|false
+     */
+    private function fromCache($login) {
+        $dir = Hm_Environment::get('DOLIBARR_CACHE_DIR', '');
+        if ($dir === '') {
+            return false;
+        }
+
+        $naming = Hm_Environment::get('DOLIBARR_MODULE_ROOT', '').'/class/integration/cachefiles.class.php';
+        if (!is_readable($naming)) {
+            Hm_Debug::add('dolibarr_contacts: cannot load '.$naming);
+            return false;
+        }
+        require_once $naming;
+
+        $file = CyphtCacheFiles::contactsFile($dir, $login);
+        if (!is_readable($file)) {
+            Hm_Debug::add('dolibarr_contacts: no cache file at '.$file);
+            return false;
+        }
+
+        $data = json_decode((string) @file_get_contents($file), true);
+        if (!is_array($data) || !isset($data['contacts']) || !is_array($data['contacts'])) {
+            Hm_Debug::add('dolibarr_contacts: cache file unreadable or malformed');
+            return false;
+        }
+
+        return $data['contacts'];
+    }
+
+    /**
      * Fetch the contact list for a Dolibarr login.
     *
      * @param string $login Dolibarr username, as put in the session by SSO
      * @return array|false Contact rows ready for Hm_Contact_Store::import(),
      */
     public function fetch($login) {
+        $cached = $this->fromCache($login);
+        if ($cached !== false) {
+            return $cached;
+        }
+
         if (!$this->configured()) {
             return false;
         }
@@ -93,6 +144,14 @@ class Hm_Dolibarr_Contacts {
             /* The token is short lived but still a bearer credential, so
              * never follow a redirect that could carry it off-host. */
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+            /* Some sites put HTTP auth in front of the whole Dolibarr. The
+             * bridge does not need it, but the proxy answers 401 before the
+             * request ever reaches PHP, so send it if one is configured. */
+            $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+            if ($proxyAuth !== '') {
+                curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+                curl_setopt($ch, CURLOPT_USERPWD, $proxyAuth);
+            }
             if (Hm_Environment::get('DOLIBARR_CONTACTS_INSECURE', 'false') === 'true') {
                 /* For local XAMPP setups serving Dolibarr over a self-signed
                  * certificate. Off by default. */
@@ -111,11 +170,16 @@ class Hm_Dolibarr_Contacts {
             return $body;
         }
 
-        $context = stream_context_create(array('http' => array(
+        $streamOpts = array(
             'timeout' => $timeout,
             'follow_location' => 0,
             'ignore_errors' => true,
-        )));
+        );
+        $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+        if ($proxyAuth !== '') {
+            $streamOpts['header'] = 'Authorization: Basic '.base64_encode($proxyAuth)."\r\n";
+        }
+        $context = stream_context_create(array('http' => $streamOpts));
         $body = @file_get_contents($url, false, $context);
         if ($body === false) {
             Hm_Debug::add('dolibarr_contacts: request failed, no curl and file_get_contents returned false');

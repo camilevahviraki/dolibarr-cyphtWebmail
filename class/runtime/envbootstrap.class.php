@@ -225,6 +225,10 @@ class CyphtEnvBootstrap
 			'DB_PASS' => $conf['pass'],
 			'DOLIBARR_DB_PREFIX' => $conf['prefix'],
 			'USER_SETTINGS_DIR' => $dataDir . '/users',
+			'DOLIBARR_CACHE_DIR' => $dataDir . '/cache',
+			/* Lets the Cypht half require code shared with this one, which
+			 * it cannot otherwise locate: its own __DIR__ is inside vendor. */
+			'DOLIBARR_MODULE_ROOT' => $this->moduleRoot,
 			'ATTACHMENT_DIR' => $dataDir . '/attachments',
 			'DOLIBARR_CONTACTS_URL' => $moduleUrl . '/bridge/contacts.php',
 			'DOLIBARR_MAIL_TEMPLATES_URL' => $moduleUrl . '/bridge/mail_templates.php',
@@ -285,6 +289,7 @@ class CyphtEnvBootstrap
 			'CYPHTWEBMAIL_CONTEXT_CACHE' => 'DOLIBARR_CONTEXT_CACHE',
 			'CYPHTWEBMAIL_CONTEXT_TIMEOUT' => 'DOLIBARR_CONTEXT_TIMEOUT',
 			'CYPHTWEBMAIL_CONTEXT_INSECURE' => 'DOLIBARR_CONTEXT_INSECURE',
+			'CYPHTWEBMAIL_BRIDGE_HTTP_AUTH' => 'DOLIBARR_BRIDGE_HTTP_AUTH',
 			'CYPHTWEBMAIL_BRIDGE_URL' => 'DOLIBARR_CONTACTS_URL',
 			'CYPHTWEBMAIL_BRIDGE_MAIL_TEMPLATES_URL' => 'DOLIBARR_MAIL_TEMPLATES_URL',
 			'CYPHTWEBMAIL_BRIDGE_CONTEXT_URL' => 'DOLIBARR_CONTEXT_URL',

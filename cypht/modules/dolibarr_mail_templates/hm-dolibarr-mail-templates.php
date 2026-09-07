@@ -106,6 +106,13 @@ class Hm_Dolibarr_Mail_Templates {
             /* The token is short lived but still a bearer credential, so
              * never follow a redirect that could carry it off-host. */
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+            /* HTTP auth in front of Dolibarr answers 401 before the request
+             * reaches PHP, so send credentials when one is configured. */
+            $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+            if ($proxyAuth !== '') {
+                curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+                curl_setopt($ch, CURLOPT_USERPWD, $proxyAuth);
+            }
             if (Hm_Environment::get('DOLIBARR_MAIL_TEMPLATES_INSECURE', 'false') === 'true') {
                 /* For local XAMPP setups serving Dolibarr over a self-signed
                  * certificate. Off by default. */
@@ -124,11 +131,16 @@ class Hm_Dolibarr_Mail_Templates {
             return $body;
         }
 
-        $context = stream_context_create(array('http' => array(
+        $streamOpts = array(
             'timeout' => $timeout,
             'follow_location' => 0,
             'ignore_errors' => true,
-        )));
+        );
+        $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+        if ($proxyAuth !== '') {
+            $streamOpts['header'] = 'Authorization: Basic '.base64_encode($proxyAuth)."\r\n";
+        }
+        $context = stream_context_create(array('http' => $streamOpts));
         $body = @file_get_contents($url, false, $context);
         if ($body === false) {
             Hm_Debug::add('dolibarr_mail_templates: request failed, no curl and file_get_contents returned false');

@@ -122,6 +122,13 @@ class Hm_Dolibarr_Context {
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
             /*  The token is short lived but still a bearer credential, so */
             curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+            /* HTTP auth in front of Dolibarr answers 401 before the request
+             * reaches PHP, so send credentials when one is configured. */
+            $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+            if ($proxyAuth !== '') {
+                curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+                curl_setopt($ch, CURLOPT_USERPWD, $proxyAuth);
+            }
             if (Hm_Environment::get('DOLIBARR_CONTEXT_INSECURE', 'false') === 'true') {
                 /*  For local XAMPP setups serving Dolibarr over a self-signed */
                 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
@@ -141,11 +148,16 @@ class Hm_Dolibarr_Context {
             return $body;
         }
 
-        $context = stream_context_create(array('http' => array(
+        $streamOpts = array(
             'timeout' => $timeout,
             'follow_location' => 0,
             'ignore_errors' => true,
-        )));
+        );
+        $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+        if ($proxyAuth !== '') {
+            $streamOpts['header'] = 'Authorization: Basic '.base64_encode($proxyAuth)."\r\n";
+        }
+        $context = stream_context_create(array('http' => $streamOpts));
         $body = @file_get_contents($url, false, $context);
         if ($body === false) {
             Hm_Debug::add('dolibarr_context: request failed, no curl and file_get_contents returned false');
@@ -241,6 +253,13 @@ class Hm_Dolibarr_Context_Create {
         curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeout);
         /*  Never follow a redirect: it would repeat the POST, and the token */
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+        /* HTTP auth in front of Dolibarr answers 401 before the request
+         * reaches PHP, so send credentials when one is configured. */
+        $proxyAuth = Hm_Environment::get('DOLIBARR_BRIDGE_HTTP_AUTH', '');
+        if ($proxyAuth !== '') {
+            curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_BASIC);
+            curl_setopt($ch, CURLOPT_USERPWD, $proxyAuth);
+        }
         if (Hm_Environment::get('DOLIBARR_CONTEXT_INSECURE', 'false') === 'true') {
             curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
             curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);

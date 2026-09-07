@@ -212,15 +212,17 @@ class CyphtEnvironment
 	/**
 	 * Pin the settings that decide auth, the session and the module set.
 	 *
-	 * config/app.php resolves all six through env(), which is getenv() only,
-	 * so a correct .env on disk does not guarantee they arrive. When they do
-	 * not, app.php falls back to upstream's defaults: auth_type DB and a
-	 * module list without 'site'. Custom_Auth, Custom_Session and
-	 * Custom_User_Config are declared in modules/site/lib.php, which is only
-	 * required when 'site' is in that list.
+	 * Cypht builds its configuration by merging every config/*.php file in
+	 * glob order, then reads most values through env(), which is getenv()
+	 * only. getenv() depends on the .env having been parsed into the process
+	 * environment, which varies by SAPI and php.ini, so a correct .env on
+	 * disk does not guarantee the value arrives. Where it does not, app.php
+	 * silently substitutes upstream Cypht's defaults, whose module list has
+	 * no 'site' and whose auth_type is DB, and the module's own Custom_Auth
+	 * is then never loaded.
 	 *
-	 * merge_config_files() globs config/*.php and array_merges in glob order,
-	 * so this file lands after app.php and wins.
+	 * Writing them as a config file instead takes them off getenv entirely.
+	 * The name sorts after app.php, which is what makes it win the merge.
 	 *
 	 * @param string $cyphtPath Cypht root inside vendor/
 	 * @param string $error Set on failure

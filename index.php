@@ -69,6 +69,17 @@ if (!$cyphtUpgrade->run()) {
 	dol_syslog('CyphtWebmail upgrade check: '.$cyphtUpgrade->error, LOG_WARNING);
 }
 
+/* Publish the address book for the webmail. The Cypht app in the iframe
+ * runs in its own request and cannot reach $db or $user, so Dolibarr leaves
+ * what it knows in a file for it. Here because this page is the one moment
+ * both are present; costs a stat once the file is warm. */
+require_once __DIR__.'/class/install/paths.class.php';
+require_once __DIR__.'/class/integration/contactcache.class.php';
+$cyphtCache = new CyphtContactCache(new CyphtPaths());
+if (!$cyphtCache->refresh($db, $user)) {
+	dol_syslog('CyphtWebmail contact cache: '.$cyphtCache->error, LOG_WARNING);
+}
+
 // Current Cypht page, carried in one opaque parameter holding Cypht's own
 // query string. Nested rather than mirrored because Cypht uses page/id/uid
 // and Dolibarr uses action/id/token: merging the namespaces collides on "id".
