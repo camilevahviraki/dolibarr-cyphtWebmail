@@ -19,9 +19,16 @@
  * \file        bridge/contacts.php
  */
 
-// This is a machine-to-machine JSON endpoint: no session, no menus, no
-if (!defined('NOLOGIN')) {
-	define('NOLOGIN', '1');
+/* Two callers, two ways in. The browser reaches this from the webmail
+ * iframe, same origin as Dolibarr, so it carries the user's session cookie
+ * and main.inc.php authenticates it. A server-to-server caller has no
+ * cookie and signs an HMAC instead, and NOLOGIN keeps main.inc.php from
+ * answering it with a login form. The choice has to be made here, before
+ * main.inc.php loads. */
+if (!empty($_GET['token']) || !empty($_POST['token'])) {
+	if (!defined('NOLOGIN')) {
+		define('NOLOGIN', '1');
+	}
 }
 if (!defined('NOCSRFCHECK')) {
 	define('NOCSRFCHECK', '1');
@@ -99,50 +106,28 @@ $token = GETPOST('token', 'aZ09');
 $search = GETPOST('search', 'alphanohtml');
 $limit = GETPOSTINT('limit');
 
-if ($login === '' || $token === '') {
-	cyphtBridgeRespond(400, array('error' => 'Missing login or token'));
-}
 
 // ---------------------------------------------------------------------
 
 // Read the constant directly rather than going through
-require_once __DIR__.'/../class/install/config.class.php';
-// Not llx_const: dolibarr_set_const() encrypts anything whose name ends
-// in _SECRET, and the webmail reads its copy over raw PDO before
-// Dolibarr is loaded, so the two ends would sign with different values.
-$secret = CyphtConfig::get($db, 'SSO_SHARED_SECRET', '');
-if ($secret === '') {
-	cyphtBridgeRespond(503, array('error' => 'SSO secret not initialised, run the module build first'));
+require_once __DIR__.'/../class/integration/bridgeauth.class.php';
+
+if ($token === '') {
+	/* Session mode: main.inc.php has already authenticated. */
+	global $user;
+	if (empty($user->id)) {
+		cyphtBridgeRespond(403, array('error' => 'Not signed in'));
+	}
+	$bridgeUser = $user;
+} else {
+	$authStatus = 403;
+	$authError = '';
+	$bridgeUser = CyphtBridgeAuth::userFromToken($db, $login, $token, 'contacts', $authStatus, $authError);
+	if ($bridgeUser === null) {
+		cyphtBridgeRespond($authStatus, array('error' => $authError));
+	}
 }
 
-if (strpos($token, '.') === false) {
-	cyphtBridgeRespond(403, array('error' => 'Malformed token'));
-}
-
-list($timestamp, $signature) = explode('.', $token, 2);
-if (!ctype_digit($timestamp)) {
-	cyphtBridgeRespond(403, array('error' => 'Malformed token'));
-}
-
-// Same 60s anti-replay window as Custom_Auth::check_credentials().
-if (abs(time() - (int) $timestamp) > 60) {
-	cyphtBridgeRespond(403, array('error' => 'Token expired'));
-}
-
-$expected = hash_hmac('sha256', $login.'|'.$timestamp.'|contacts', $secret);
-if (!hash_equals($expected, $signature)) {
-	cyphtBridgeRespond(403, array('error' => 'Bad signature'));
-}
-
-// ---------------------------------------------------------------------
-
-$bridgeUser = new User($db);
-if ($bridgeUser->fetch(0, $login) <= 0) {
-	cyphtBridgeRespond(403, array('error' => 'Unknown user'));
-}
-if (isset($bridgeUser->statut) && $bridgeUser->statut == 0) {
-	cyphtBridgeRespond(403, array('error' => 'Disabled user'));
-}
 $bridgeUser->loadRights();
 
 // NOLOGIN leaves $conf->entity at its default; realign it with the user so
