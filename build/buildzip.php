@@ -219,10 +219,17 @@ function cyphtPkgCheckVersion($version)
 /**
  * Everything the runtime never reads, relative to the staged module root.
  *
- * The three asset packages are the bulk of it: config_gen compiles them into
+ * The two asset packages are the bulk of it: config_gen compiles them into
  * public/site.css, public/site.js and the theme stylesheets, and the only code
  * that points a browser back at vendor/ is get_js_libs(), which runs solely
  * under DEBUG_MODE.
+ *
+ * Safe to drop only because the build's first step, composer install,
+ * fetches them again. An installed module can rebuild itself, from the
+ * setup page or on activation, so the rule is: anything a rebuild consumes
+ * must either survive here or be restorable by composer. third_party/ is
+ * neither, since it ships inside the jason-munro/cypht package rather than
+ * as a package of its own.
  *
  * @return string[]
  */
@@ -236,7 +243,6 @@ function cyphtPkgPruneList()
 		$cypht.'site',
 		$cypht.'site.js',
 		$cypht.'site.css',
-		$cypht.'third_party',
 		$cypht.'fonts',
 		$cypht.'tests',
 		$cypht.'docker',
@@ -273,6 +279,9 @@ function cyphtPkgVerify($zipPath, $dirName, array $forbidden)
 		$dirName.'/vendor/jason-munro/cypht/vendor/autoload.php' => 'the autoloader shim public/index.php requires',
 		$dirName.'/vendor/autoload.php' => 'the Composer autoloader',
 		$dirName.'/core/modules/modcyphtWebmail.class.php' => 'the module descriptor',
+		$dirName.'/vendor/jason-munro/cypht/modules/site/lib.php' => 'the site module set, which declares Custom_Auth',
+		$dirName.'/vendor/jason-munro/cypht/config/zz_dolibarr.php' => 'the config pinning auth_type and the module list',
+		$dirName.'/vendor/jason-munro/cypht/third_party/cash.min.js' => 'a rebuild input; without it site.js compiles with $ undefined',
 	);
 	foreach ($required as $entry => $what) {
 		if ($zip->locateName($entry) === false) {
